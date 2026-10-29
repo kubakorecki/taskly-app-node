@@ -201,6 +201,11 @@ jobs:
           git diff --cached --binary "$TREE" > "$OUT/test-agent.patch"
           cp test-agent-manifest.json "$OUT/"
           [[ ! -f test-agent-report.json ]] || cp test-agent-report.json "$OUT/"
+          # The CLI's last result event says why the agent stopped. Its text is the agent's last message unless the
+          # API ended the run, so only an API error keeps it. A run cut off by the timeout has no result event.
+          [[ ! -f $OUT/transcript.jsonl ]] || jq -cR 'fromjson? | select(.type == "result") | {subtype, api_error,
+            api_error_status, result: (if .api_error then .result else null end)}' "$OUT/transcript.jsonl" |
+            tail -n 1 > "$OUT/agent-result.json"
           if [[ -n $CLAUDE_CODE_OAUTH_TOKEN ]] && grep -rqF -- "$CLAUDE_CODE_OAUTH_TOKEN" "$OUT"; then
             echo '::error::The agent output contains the Claude token, so nothing is uploaded'
             exit 1
@@ -225,6 +230,7 @@ jobs:
             ${{ env.OUT }}/test-agent.patch
             ${{ env.OUT }}/test-agent-manifest.json
             ${{ env.OUT }}/test-agent-report.json
+            ${{ env.OUT }}/agent-result.json
           retention-days: 30
 
   # Runs both suites with coverage, the typechecks and format:check on the head commit with the agent's patch.

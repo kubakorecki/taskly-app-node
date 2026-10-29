@@ -1,5 +1,5 @@
-# The program behind scripts/test-agent-render.sh. $manifest, $report, $patch_check and $results each come in as
-# the slurped file, empty when it's missing, and are rebound to the parsed file or null.
+# The program behind scripts/test-agent-render.sh. $manifest, $report, $agent_result, $patch_check and $results each
+# come in as the slurped file, empty when it's missing, and are rebound to the parsed file or null.
 
 def plural($n; $word): "\($n) \($word)\(if $n == 1 then "" else "s" end)";
 def capitalize: (.[:1] | ascii_upcase) + .[1:];
@@ -32,6 +32,7 @@ def pcts:
 
 $manifest[0] as $manifest
 | ($report[0] | if . != null and .version == 1 then . else null end) as $report
+| $agent_result[0] as $agent_result
 | $patch_check[0] as $patch_check
 | $results[0] as $results
 | [$manifest.files[]? | select((.kind == "backend" or .kind == "frontend") and .change != "deleted")] as $targets
@@ -60,6 +61,18 @@ $manifest[0] as $manifest
    elif $changed then {conclusion: "success", title: "Tests updated, all checks passed"}
    else {conclusion: "success", title: "No test changes, all checks passed"} end) as $verdict
 
+# Why the agent stopped before it finished its report, or null when it finished. Leads the title, because what
+# failed after an early stop is usually work the agent never got to verify.
+| (if $manifest == null or $targets == [] or ($report.finished != false and $ENV.AGENT != "failure") then null
+   elif $agent_result == null then "timed out or crashed"
+   elif $agent_result.api_error == "usage_limit_reached" then "Claude usage limit reached"
+   elif $agent_result.api_error != null then "API error: \($agent_result.api_error | tostring | gsub("[^A-Za-z0-9_ -]"; ""))"
+   elif $agent_result.subtype == "error_max_turns" then "turn limit reached"
+   elif $agent_result.subtype == "error_during_execution" then "error during the run"
+   else "ended without finishing its report" end) as $stopped
+| (if $stopped == null then $verdict
+   else $verdict + {title: "The agent stopped early (\($stopped)): \($verdict.title | lowercase_first)"} end) as $verdict
+
 | ($report.decisions // [] | map({key: (.sourceFile | tostring), value: .}) | from_entries) as $decisions
 | ($report.intentionalChanges // [] | map({key: (.id | tostring), value: .description}) | from_entries) as $intentional
 
@@ -68,8 +81,9 @@ $manifest[0] as $manifest
 | (if $manifest == null or $targets == [] then [] else [
     ($report.summary | select(. != null) | esc),
 
-    (select($report.finished == false or $ENV.AGENT == "failure")
-      | "> [!WARNING]\n> The test agent stopped before it finished (turn limit or timeout), so this report is partial."),
+    ($stopped | select(. != null)
+      | "> [!WARNING]\n> The test agent stopped before it finished (\(.)), so this report is partial."
+        + ($agent_result.result | if . != null then "\n>\n> Claude Code: \(esc)" else "" end)),
 
     "#### Test decisions",
     ([ "| Source file | Decision | Test file | Reason |", "| --- | --- | --- | --- |",

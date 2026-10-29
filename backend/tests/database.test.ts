@@ -1,0 +1,36 @@
+import { afterEach, it, expect, vi } from 'vitest';
+import { createDatabase, initialize } from '../src/core/database.ts';
+
+afterEach(() => vi.restoreAllMocks());
+
+function setup() {
+  return { database: createDatabase('postgresql://test:test@localhost:5432/test') };
+}
+
+it('creates a Prisma client without connecting', () => {
+  const { database } = setup();
+  // The client is a Prisma proxy, not a plain PrismaClient instance, so check its surface.
+  const connect = vi.spyOn(database, '$connect');
+  for (const method of ['findMany', 'findUnique', 'findFirst', 'create', 'updateManyAndReturn', 'deleteMany'] as const) expect(typeof database.todo[method]).toBe('function');
+  expect(typeof database.$executeRaw).toBe('function');
+  expect(connect).not.toHaveBeenCalled();
+});
+
+it('creates the todos table with the validator limits', async () => {
+  const { database } = setup();
+  const executeRaw = vi.spyOn(database, '$executeRaw').mockResolvedValue(0 as never);
+  await initialize(database);
+  expect(executeRaw).toHaveBeenCalledOnce();
+  const sql = (executeRaw.mock.calls[0][0] as unknown as TemplateStringsArray).join('');
+  expect(sql).toContain('CREATE TABLE IF NOT EXISTS todos');
+  expect(sql).toContain('title VARCHAR(120) NOT NULL CONSTRAINT todo_title_not_empty CHECK (length(title) >= 1)');
+  expect(sql).toContain("description VARCHAR(2000) NOT NULL DEFAULT ''");
+  expect(sql).toContain("priority VARCHAR(6) NOT NULL DEFAULT 'medium' CONSTRAINT todo_priority CHECK (priority IN ('low', 'medium', 'high'))");
+  expect(sql).toContain('completed BOOLEAN NOT NULL DEFAULT FALSE');
+});
+
+it('propagates a failed table creation', async () => {
+  const { database } = setup();
+  vi.spyOn(database, '$executeRaw').mockRejectedValue(new Error('permission denied for schema public'));
+  await expect(initialize(database)).rejects.toThrow('permission denied for schema public');
+});
