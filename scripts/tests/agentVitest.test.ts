@@ -5,11 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // scripts/agent-vitest.sh is the only way the test agent runs tests, so test code must not see its tokens.
-const wrapper = fileURLToPath(new URL('../../scripts/agent-vitest.sh', import.meta.url));
-const backendDir = fileURLToPath(new URL('..', import.meta.url));
+const wrapper = fileURLToPath(new URL('../agent-vitest.sh', import.meta.url));
+const backendDir = fileURLToPath(new URL('../../backend', import.meta.url));
 const probe = `tests/agent-env-probe-${randomUUID()}.test.ts`;
-// TZ is on the allow-list, so it marks nested runs: this file must not run again inside one (a broken
-// wrapper could let it), and a probe left behind by a crash skips itself in ordinary runs.
+// TZ is on the allow-list, so it marks nested runs: a probe left behind by a crash skips itself in ordinary runs.
 const nestedTz = 'Pacific/Kiritimati';
 const envWithSecrets = {
   PATH: process.env.PATH, HOME: process.env.HOME, TZ: nestedTz,
@@ -18,7 +17,7 @@ const envWithSecrets = {
 const run = (cmd: string, args: string[]) =>
   spawnSync(cmd, args, { cwd: backendDir, env: envWithSecrets, encoding: 'utf8', timeout: 30_000 });
 
-describe.skipIf(process.env.TZ === nestedTz)('agent vitest wrapper', { timeout: 60_000 }, () => {
+describe('agent vitest wrapper', { timeout: 60_000 }, () => {
   beforeAll(() => writeFileSync(`${backendDir}/${probe}`, `import { expect, it } from 'vitest';
 it.skipIf(process.env.TZ !== '${nestedTz}')('hides the tokens from test code', () => {
   expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();

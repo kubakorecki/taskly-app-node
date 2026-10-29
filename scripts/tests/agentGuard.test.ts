@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
 // scripts/agent-guard.sh is the test agent's PreToolUse hook: exit 0 lets a tool call through, exit 2 blocks it.
-const guard = fileURLToPath(new URL('../../scripts/agent-guard.sh', import.meta.url));
+const guard = fileURLToPath(new URL('../agent-guard.sh', import.meta.url));
 const root = fileURLToPath(new URL('../..', import.meta.url)).replace(/\/$/, '');
 const fileLink = `backend/tests/agent-guard-link-${randomUUID()}.ts`;
 const dirLink = `backend/tests/agent-guard-dir-${randomUUID()}`;
@@ -34,7 +34,7 @@ it.each([
 it.each([
   'backend/src/factory.ts', 'backend/vitest.config.ts', 'backend/package.json', 'frontend/src/features/todos/utils.ts',
   'frontend/vite.config.ts', 'frontend/.prettierrc', 'frontend/node_modules/x/a.test.ts', 'backend/node_modules/x/a.test.ts',
-  'scripts/agent-vitest.sh', 'scripts/agent-guard.sh', '.claude/agents/unit-test-agent.md', '.claude/settings.json',
+  'scripts/agent-vitest.sh', 'scripts/agent-guard.sh', 'scripts/tests/agentGuard.test.ts', '.claude/agents/unit-test-agent.md', '.claude/settings.json',
   '.github/workflows/ci.yml', 'test-agent-manifest.json', 'backend/tests/../src/factory.ts', 'frontend/src/test/../App.tsx',
   'backend/tests/..', '/etc/passwd', '/tmp/x.test.ts', `${root}-evil/backend/tests/a.test.ts`, `${root}/../x/backend/tests/a.test.ts`,
   'frontend/src/test/setup.ts', fileLink, `${dirLink}/new.test.ts`, `${danglingLink}/a.test.ts`, '~/a.test.ts', '',

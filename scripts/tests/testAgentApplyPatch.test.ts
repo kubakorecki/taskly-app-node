@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 
 // scripts/test-agent-apply-patch.sh applies the test agent's patch and rejects anything that isn't a test or fixture file.
-const script = fileURLToPath(new URL('../../scripts/test-agent-apply-patch.sh', import.meta.url));
+const script = fileURLToPath(new URL('../test-agent-apply-patch.sh', import.meta.url));
 let repo: string;
 
 const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
