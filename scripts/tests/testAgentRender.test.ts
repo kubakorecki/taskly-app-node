@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 
 // scripts/test-agent-render.sh decides the test-agent check and the commit, and renders the sticky PR comment.
-const script = fileURLToPath(new URL('../../scripts/test-agent-render.sh', import.meta.url));
+const script = fileURLToPath(new URL('../test-agent-render.sh', import.meta.url));
 let dir: string;
 
 const full = { statements: 100, branches: 100, functions: 100, lines: 100 };

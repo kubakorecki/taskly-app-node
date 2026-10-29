@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 
 // scripts/test-agent-results.sh turns the verify job's raw Vitest, typecheck and format output into test-agent-results.json.
-const script = fileURLToPath(new URL('../../scripts/test-agent-results.sh', import.meta.url));
+const script = fileURLToPath(new URL('../test-agent-results.sh', import.meta.url));
 let repo: string;
 let out: string;
 

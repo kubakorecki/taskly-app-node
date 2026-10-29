@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 
 // scripts/test-agent-manifest.sh writes the change manifest the test agent starts from (.claude/skills/analyze-pr-changes).
-const script = fileURLToPath(new URL('../../scripts/test-agent-manifest.sh', import.meta.url));
+const script = fileURLToPath(new URL('../test-agent-manifest.sh', import.meta.url));
 let repo: string;
 
 const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();

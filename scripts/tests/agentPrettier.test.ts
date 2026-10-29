@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, expect, it } from 'vitest';
 
 // scripts/agent-prettier.sh is how the test agent formats test files, so a Prettier plugin or config from a PR must not see its tokens.
-const wrapper = fileURLToPath(new URL('../../scripts/agent-prettier.sh', import.meta.url));
+const wrapper = fileURLToPath(new URL('../agent-prettier.sh', import.meta.url));
 const root = fileURLToPath(new URL('../..', import.meta.url)).replace(/\/$/, '');
 // Not a .test.ts name, so a probe left behind by a crash never runs as a test.
 const probe = `frontend/src/test/agent-prettier-probe-${randomUUID()}.ts`;
@@ -13,7 +13,7 @@ const run = (args: string[]) => spawnSync(wrapper, args, { cwd: root, encoding: 
 
 afterAll(() => rmSync(`${root}/${probe}`, { force: true }));
 
-// CI installs one package per job, so the backend job has no frontend Prettier to run.
+// Needs the frontend's Prettier, which the test-agent-scripts CI job installs.
 it.skipIf(!existsSync(`${root}/frontend/node_modules/.bin/prettier`))('formats frontend test files in place', () => {
   writeFileSync(`${root}/${probe}`, 'const a = {b:1}\n');
   expect(run([probe]).status).toBe(0);

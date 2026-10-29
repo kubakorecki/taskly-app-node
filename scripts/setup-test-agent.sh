@@ -214,7 +214,7 @@ fi
 # The CI job names in .github/workflows/ci.yml; renaming a job there means
 # updating this. 15368 is the GitHub Actions app, so no other app (the test
 # agent's included, which has checks:write) can satisfy them.
-REQUIRED_CHECKS='[{"context": "backend", "app_id": 15368}, {"context": "frontend", "app_id": 15368}]'
+REQUIRED_CHECKS='[{"context": "backend", "app_id": 15368}, {"context": "frontend", "app_id": 15368}, {"context": "test-agent-scripts", "app_id": 15368}]'
 
 has_secret() { [[ -n "$(gh secret list --json name -q ".[] | select(.name == \"$1\") | .name")" ]]; }
 has_var()    { [[ -n "$(gh variable list --json name -q ".[] | select(.name == \"$1\") | .name")" ]]; }
@@ -329,7 +329,7 @@ pause "Press Enter for the next stage"
 stage "Protect main"
 say "Branch protection on main in $REPO:"
 step "Require a pull request (0 approvals, since this is a one-person repo)."
-step "Require the ci checks backend and frontend, reported by GitHub Actions, to pass."
+step "Require the ci checks backend, frontend and test-agent-scripts, reported by GitHub Actions, to pass."
 step "Require the branch to be up to date with main before merging."
 step "Apply the rules to admins too, so main only changes through PRs."
 note "The workflow never pushes the test agent's commits to main, so the app needs no bypass."
