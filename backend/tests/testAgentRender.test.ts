@@ -203,12 +203,38 @@ it('escapes the text the agent wrote', () => {
   expect(body.match(/@octocat/g)).toEqual(['@octocat']);
 });
 
+it.each([
+  ['no result event', undefined, 'timed out or crashed'],
+  ['the usage limit', { subtype: 'success', api_error: 'usage_limit_reached', api_error_status: 429, result: 'limit' }, 'Claude usage limit reached'],
+  ['another API error', { subtype: 'success', api_error: 'overloaded_error\n::error::x', api_error_status: 529, result: 'busy' }, 'API error: overloaded_errorerrorx'],
+  ['the turn limit', { subtype: 'error_max_turns', api_error: null, result: null }, 'turn limit reached'],
+  ['an execution error', { subtype: 'error_during_execution', api_error: null, result: null }, 'error during the run'],
+  ['a clean exit', { subtype: 'success', api_error: null, result: null }, 'ended without finishing its report'],
+])('says the agent stopped early after %s', (_, agentResult, reason) => {
+  inputs({
+    'test-agent-report.json': { ...report, finished: false }, 'agent-result.json': agentResult,
+    'test-agent-results.json': { ...results, checks: [{ ...passed('backend tests'), ok: false }] },
+  });
+
+  const { conclusion, title, body } = render({ AGENT: 'failure' });
+
+  expect({ conclusion, title }).toEqual({ conclusion: 'failure', title: `The agent stopped early (${reason}): backend tests failed` });
+  expect(body).toContain(`> [!WARNING]\n> The test agent stopped before it finished (${reason}), so this report is partial.`);
+});
+
+it("quotes Claude Code's message when the API ended the run", () => {
+  inputs({ 'agent-result.json': { subtype: 'success', api_error: 'usage_limit_reached', api_error_status: 429, result: "You've hit your limit · resets 1:10pm *now*" } });
+  expect(render({ AGENT: 'failure' }).body).toContain("so this report is partial.\n>\n> Claude Code: You've hit your limit · resets 1:10pm \\*now\\*\n");
+});
+
 it('warns when the agent stopped early', () => {
-  inputs({ 'test-agent-report.json': { ...report, finished: false } });
-  expect(render().body).toContain('> [!WARNING]\n> The test agent stopped before it finished (turn limit or timeout), so this report is partial.\n');
+  inputs({ 'test-agent-report.json': { ...report, finished: false }, 'agent-result.json': { subtype: 'success', api_error: null, result: null } });
+  expect(render().body).toContain('> [!WARNING]\n> The test agent stopped before it finished (ended without finishing its report), so this report is partial.\n');
 
   inputs();
   expect(render({ AGENT: 'failure' }).body).toContain('> [!WARNING]');
+  expect(render().body).not.toContain('> [!WARNING]');
+  expect(render().title).toBe('1 test added, all checks passed');
 });
 
 it('cuts a comment that is too long for GitHub', () => {
