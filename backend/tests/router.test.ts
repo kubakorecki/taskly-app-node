@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { type ErrorRequestHandler } from 'express';
 import request from 'supertest';
 import { it, expect, vi } from 'vitest';
 import { createTodosRouter } from '../src/features/todos/router.ts';
@@ -32,3 +32,96 @@ it.each([{ title: '  ' }, { title: 'x'.repeat(121) }, { title: 'Task', priority:
     expect(repository.create).not.toHaveBeenCalled();
   },
 );
+it('accepts a title and description at their maximum lengths', async () => {
+  const { app, repository } = setup();
+  const response = await request(app).post('/api/todos').send({ title: 'x'.repeat(120), description: 'd'.repeat(2000) });
+  expect(response.status).toBe(201);
+  expect(repository.create).toHaveBeenCalledWith({ title: 'x'.repeat(120), description: 'd'.repeat(2000), priority: 'medium', due_date: null, completed: false });
+});
+it.each([{ title: '' }, {}, { title: 'Task', description: 'd'.repeat(2001) }, { title: 'Task', id: 1 }, { title: 'Task', completed: 'yes' }])(
+  'rejects blank, oversized or unknown create fields without calling the repository: %j', async (payload) => {
+    const { app, repository } = setup();
+    expect((await request(app).post('/api/todos').send(payload)).status).toBe(422);
+    expect(repository.create).not.toHaveBeenCalled();
+  },
+);
+it.each(['{"title":"Task","__proto__":{"admin":true}}', '{"title":"Task","constructor":{"prototype":{"admin":true}}}', '{"title":"Task","prototype":{"admin":true}}'])(
+  'rejects prototype keys in a create payload: %s', async (body) => {
+    const { app, repository } = setup();
+    const response = await request(app).post('/api/todos').set('Content-Type', 'application/json').send(body);
+    expect(response.status).toBe(422);
+    expect(repository.create).not.toHaveBeenCalled();
+  },
+);
+it('stores HTML in a title verbatim', async () => {
+  const { app, repository } = setup();
+  await request(app).post('/api/todos').send({ title: '<script>alert(1)</script>', description: '<b>bold</b>' });
+  expect(repository.create).toHaveBeenCalledWith({ title: '<script>alert(1)</script>', description: '<b>bold</b>', priority: 'medium', due_date: null, completed: false });
+});
+it('gets a task by ID', async () => {
+  const { app, repository } = setup();
+  repository.get.mockResolvedValue(todo);
+  const response = await request(app).get('/api/todos/1');
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual(todo);
+  expect(repository.get).toHaveBeenCalledWith(1);
+});
+it('returns 404 for a missing task on get, update and delete', async () => {
+  const { app, repository } = setup();
+  repository.get.mockResolvedValue(null);
+  repository.update.mockResolvedValue(null);
+  repository.delete.mockResolvedValue(false);
+  for (const response of [await request(app).get('/api/todos/99'), await request(app).patch('/api/todos/99').send({ completed: true }), await request(app).delete('/api/todos/99')]) {
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ detail: 'Task not found.' });
+  }
+  expect(repository.update).toHaveBeenCalledWith(99, { completed: true });
+  expect(repository.delete).toHaveBeenCalledWith(99);
+});
+it('updates a task with trimmed fields', async () => {
+  const { app, repository } = setup();
+  repository.update.mockResolvedValue({ ...todo, title: 'Renamed', completed: true });
+  const response = await request(app).patch('/api/todos/1').send({ title: '  Renamed  ', completed: true });
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual({ ...todo, title: 'Renamed', completed: true });
+  expect(repository.update).toHaveBeenCalledWith(1, { title: 'Renamed', completed: true });
+});
+it.each([{}, { id: 2 }, { title: '' }, { title: '   ' }, { title: 'x'.repeat(121) }, { description: 'd'.repeat(2001) }, { priority: 'urgent' }, { due_date: '2026-13-01' }])(
+  'rejects empty, blank or invalid update input without calling the repository: %j', async (payload) => {
+    const { app, repository } = setup();
+    expect((await request(app).patch('/api/todos/1').send(payload)).status).toBe(422);
+    expect(repository.update).not.toHaveBeenCalled();
+  },
+);
+it('rejects prototype keys in an update payload', async () => {
+  const { app, repository } = setup();
+  const response = await request(app).patch('/api/todos/1').set('Content-Type', 'application/json').send('{"__proto__":{"admin":true}}');
+  expect(response.status).toBe(422);
+  expect(repository.update).not.toHaveBeenCalled();
+});
+it('deletes a task', async () => {
+  const { app, repository } = setup();
+  repository.delete.mockResolvedValue(true);
+  const response = await request(app).delete('/api/todos/1');
+  expect(response.status).toBe(204);
+  expect(response.text).toBe('');
+  expect(repository.delete).toHaveBeenCalledWith(1);
+});
+it.each(['0', '-1', '1.5', 'abc', '9007199254740992'])('rejects invalid id %s without calling the repository', async (id) => {
+  const { app, repository } = setup();
+  for (const response of [await request(app).get(`/api/todos/${id}`), await request(app).patch(`/api/todos/${id}`).send({ completed: true }), await request(app).delete(`/api/todos/${id}`)]) {
+    expect(response.status).toBe(422);
+  }
+  expect(repository.get).not.toHaveBeenCalled();
+  expect(repository.update).not.toHaveBeenCalled();
+  expect(repository.delete).not.toHaveBeenCalled();
+});
+it('propagates repository errors', async () => {
+  const { app, repository } = setup();
+  repository.list.mockRejectedValue(new Error('Database unavailable'));
+  const errors: unknown[] = [];
+  const handleError: ErrorRequestHandler = (error, req, res, next) => { errors.push(error); res.status(500).json({ detail: 'Internal Server Error' }); };
+  app.use(handleError);
+  expect((await request(app).get('/api/todos')).status).toBe(500);
+  expect(errors).toEqual([new Error('Database unavailable')]);
+});
