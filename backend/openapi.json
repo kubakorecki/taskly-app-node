@@ -189,9 +189,14 @@
             "nullable": true,
             "default": null
           },
-          "completed": {
-            "type": "boolean",
-            "default": false
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "doing",
+              "done"
+            ],
+            "default": "open"
           }
         }
       },
@@ -222,8 +227,13 @@
             "format": "date",
             "nullable": true
           },
-          "completed": {
-            "type": "boolean"
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "doing",
+              "done"
+            ]
           }
         }
       },
@@ -234,7 +244,7 @@
           "description",
           "priority",
           "due_date",
-          "completed",
+          "status",
           "id",
           "created_at",
           "updated_at"
@@ -265,9 +275,14 @@
             "nullable": true,
             "default": null
           },
-          "completed": {
-            "type": "boolean",
-            "default": false
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "doing",
+              "done"
+            ],
+            "default": "open"
           },
           "id": {
             "type": "integer"
