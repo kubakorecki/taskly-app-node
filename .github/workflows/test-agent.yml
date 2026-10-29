@@ -152,6 +152,8 @@ jobs:
 
       # Two layers: the agent's guard hook (scripts/agent-guard.sh) and this allowlist, with everything else
       # denied. A run cut short leaves a report with finished: false, which the publish job still uses.
+      # Hooks in the agent's frontmatter only run in a trusted workspace, and a CI checkout isn't one, so the guard
+      # comes in through --settings, from a file outside the repo.
       - name: Run the test agent
         id: agent
         if: steps.manifest.outputs.target-count != '0'
@@ -163,17 +165,18 @@ jobs:
           DISABLE_AUTOUPDATER: '1'
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
         run: |
+          jq -n '{hooks: {PreToolUse: [{matcher: "*", hooks: [{type: "command",
+            command: "\"$CLAUDE_PROJECT_DIR\"/scripts/agent-guard.sh"}]}]}}' > "$RUNNER_TEMP/agent-settings.json"
           claude -p 'Run the test agent on test-agent-manifest.json.' \
             --agent unit-test-agent ${MODEL:+--model "$MODEL"} --max-turns 40 \
-            --permission-mode dontAsk \
+            --settings "$RUNNER_TEMP/agent-settings.json" --permission-mode dontAsk \
             --allowedTools Read Glob Grep Edit Write 'Bash(scripts/agent-vitest.sh:*)' 'Bash(scripts/agent-prettier.sh:*)' \
             --strict-mcp-config --no-session-persistence \
             --output-format stream-json --verbose --include-hook-events \
             > "$OUT/transcript.jsonl"
 
-      # Agent frontmatter hooks need a trusted workspace. Headless runs skip the trust check, so the guard should
-      # fire on every tool call, but a run where it didn't must never be published. The base branch's .claude is
-      # restored above, so the guard is the only PreToolUse hook.
+      # The guard should fire on every tool call, but a run where it didn't must never be published. The base
+      # branch's .claude is restored above, so the guard is the only PreToolUse hook.
       - name: Check the guard ran on every tool call
         id: guard
         if: ${{ !cancelled() && steps.agent.outcome != 'skipped' }}
