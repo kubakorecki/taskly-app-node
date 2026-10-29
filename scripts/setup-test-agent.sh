@@ -142,7 +142,7 @@ write_env() {
 # to a warning (and records it) if gh is unavailable or unauthenticated.
 set_secret() {
   local name="$1" value="$2"
-  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  if command -v gh >/dev/null 2>&1 && gh auth status --active >/dev/null 2>&1; then
     if printf '%s' "$value" | gh secret set "$name" >/dev/null 2>&1; then
       WRITTEN_SECRET+=("$name")
       printf '  %s✓ set%s GitHub secret %s\n' "$GREEN" "$RESET" "$name"
@@ -156,7 +156,7 @@ set_secret() {
 # set_var NAME VALUE sets a GitHub Actions repo variable (non-secret).
 set_var() {
   local name="$1" value="$2"
-  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  if command -v gh >/dev/null 2>&1 && gh auth status --active >/dev/null 2>&1; then
     if gh variable set "$name" --body "$value" >/dev/null 2>&1; then
       printf '  %s✓ set%s GitHub variable %s\n' "$GREEN" "$RESET" "$name"
       return
@@ -195,7 +195,7 @@ die() { printf '%s%s%s\n' "$RED" "$1" "$RESET" >&2; exit 1; }
 
 [[ -t 0 ]] || die "This wizard is interactive: run it in a terminal."
 cd "$(git rev-parse --show-toplevel)"
-if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+if ! command -v gh >/dev/null 2>&1 || ! gh auth status --active >/dev/null 2>&1; then
   die "This wizard needs the GitHub CLI, logged in as a repo admin: gh auth login"
 fi
 
