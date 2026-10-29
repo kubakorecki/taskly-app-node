@@ -29,7 +29,7 @@ it.each(['2026-10-15', null])('creates tasks with calendar dates and timestamps 
   const { database, repository } = setup();
   const date = due_date ? new Date(`${due_date}T00:00:00.000Z`) : null;
   const create = vi.spyOn(database.todo, 'create').mockResolvedValue({ ...record, due_date: date });
-  expect(await repository.create({ title: 'Task', description: '', priority: 'medium', completed: false, due_date }))
+  expect(await repository.create({ title: 'Task', description: '', priority: 'medium', status: 'open', due_date }))
     .toEqual({ ...todo, due_date });
   const data = create.mock.calls[0][0].data;
   expect(data).toMatchObject({ title: 'Task', due_date: date });
@@ -39,11 +39,50 @@ it.each(['2026-10-15', null])('creates tasks with calendar dates and timestamps 
 
 it('updates fields without clearing an omitted due date', async () => {
   const { database, repository } = setup();
-  const update = vi.spyOn(database.todo, 'updateManyAndReturn').mockResolvedValue([{ ...record, completed: true }]);
-  expect(await repository.update(1, { completed: true })).toEqual({ ...todo, completed: true });
+  const update = vi.spyOn(database.todo, 'updateManyAndReturn').mockResolvedValue([{ ...record, status: 'done' }]);
+  expect(await repository.update(1, { status: 'done' })).toEqual({ ...todo, status: 'done' });
   expect(update).toHaveBeenCalledWith({
-    where: { id: 1 }, data: { completed: true, due_date: undefined, updated_at: expect.any(Date) },
+    where: { id: 1 }, data: { status: 'done', due_date: undefined, updated_at: expect.any(Date) },
   });
+});
+
+it.each(['open', 'doing', 'done'] as const)('updates the status to %s', async (status) => {
+  const { database, repository } = setup();
+  const update = vi.spyOn(database.todo, 'updateManyAndReturn').mockResolvedValue([{ ...record, status }]);
+  expect((await repository.update(1, { status }))?.status).toBe(status);
+  expect(update.mock.calls[0][0].data).toMatchObject({ status });
+});
+
+it('rejects the legacy completed field on update without touching the database', async () => {
+  const { database, repository } = setup();
+  const update = vi.spyOn(database.todo, 'updateManyAndReturn');
+  await expect(repository.update(1, JSON.parse('{"completed":true}'))).rejects.toThrow('Invalid update fields.');
+  await expect(repository.update(1, JSON.parse('{"status":"done","completed":true}'))).rejects.toThrow('Invalid update fields.');
+  expect(update).not.toHaveBeenCalled();
+});
+
+it.each(['{"__proto__":{"admin":true},"title":"Task"}', '{"constructor":{"prototype":{"admin":true}}}', '{"prototype":{"admin":true}}'])(
+  'rejects prototype keys on update: %s', async (body) => {
+    const { database, repository } = setup();
+    const update = vi.spyOn(database.todo, 'updateManyAndReturn');
+    await expect(repository.update(1, JSON.parse(body))).rejects.toThrow('Invalid update fields.');
+    expect(update).not.toHaveBeenCalled();
+  },
+);
+
+it('creates a task with a chosen status and stores HTML verbatim', async () => {
+  const { database, repository } = setup();
+  const html = '<script>alert(1)</script>';
+  const create = vi.spyOn(database.todo, 'create').mockResolvedValue({ ...record, title: html, status: 'doing' });
+  expect(await repository.create({ title: html, description: '', priority: 'high', status: 'doing', due_date: null }))
+    .toEqual({ ...todo, title: html, status: 'doing' });
+  expect(create.mock.calls[0][0].data).toMatchObject({ title: html, status: 'doing' });
+});
+
+it('propagates a failed status update', async () => {
+  const { database, repository } = setup();
+  vi.spyOn(database.todo, 'updateManyAndReturn').mockRejectedValue(new Error('connect ECONNREFUSED 10.0.0.5:5432'));
+  await expect(repository.update(1, { status: 'done' })).rejects.toThrow('connect ECONNREFUSED 10.0.0.5:5432');
 });
 
 it.each(['2026-10-15', null])('updates or clears a due date (%s)', async (due_date) => {

@@ -43,8 +43,36 @@ describe('TodoForm', () => {
       description: '',
       priority: 'high',
       due_date: null,
-      completed: false,
+      status: 'open',
     })
+  })
+
+  it('offers the priorities in order and keeps the status of an edited task', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(
+      <TodoForm
+        initial={{ ...todoFixture, status: 'doing' }}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+        busy={false}
+        error={null}
+      />,
+    )
+    const priority = screen.getByLabelText('Priority')
+    expect(
+      Array.from(priority.querySelectorAll('option'), (option) => [
+        option.value,
+        option.textContent,
+      ]),
+    ).toEqual([
+      ['low', 'Low'],
+      ['medium', 'Medium'],
+      ['high', 'High'],
+    ])
+    expect(priority).toHaveValue('medium')
+    await user.click(screen.getByRole('button', { name: 'Save task' }))
+    expect(onSubmit).toHaveBeenCalledWith({ ...todoFixture, status: 'doing' })
   })
 
   it('rejects an empty title without submitting', async () => {

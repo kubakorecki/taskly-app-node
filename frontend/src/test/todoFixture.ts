@@ -5,7 +5,7 @@ export const todoFixture: Todo = {
   title: 'Prepare a demo',
   description: '',
   priority: 'medium',
-  completed: false,
+  status: 'open',
   due_date: null,
   created_at: '2026-10-01T12:00:00Z',
   updated_at: '2026-10-01T12:00:00Z',

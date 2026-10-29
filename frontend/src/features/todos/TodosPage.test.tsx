@@ -177,47 +177,79 @@ it('disables creation while a task mutation is running', () => {
 
 it('completes an active task and celebrates', async () => {
   const { mutateAsync, notify } = setup({
-    mutateAsync: vi.fn().mockResolvedValue({ ...todoFixture, completed: true }),
+    mutateAsync: vi.fn().mockResolvedValue({ ...todoFixture, status: 'done' }),
   })
   render(<TodosPage />)
-  await act(async () => listProps().onToggle(todoFixture))
+  await act(async () => listProps().onStatusChange(todoFixture, 'done'))
   expect(mutateAsync).toHaveBeenCalledWith({
     id: 7,
-    input: { completed: true },
+    input: { status: 'done' },
   })
-  expect(notify).toHaveBeenCalledWith('Another task complete. Well done!')
+  expect(notify).toHaveBeenCalledWith('Task marked as done. Well done!')
 })
 
-it('marks a done task as active again', async () => {
-  const done = { ...todoFixture, completed: true }
+it('marks a done task as open again', async () => {
+  const done = { ...todoFixture, status: 'done' as const }
   const { mutateAsync, notify } = setup({
     mutateAsync: vi.fn().mockResolvedValue(todoFixture),
   })
   render(<TodosPage />)
-  await act(async () => listProps().onToggle(done))
+  await act(async () => listProps().onStatusChange(done, 'open'))
   expect(mutateAsync).toHaveBeenCalledWith({
     id: 7,
-    input: { completed: false },
+    input: { status: 'open' },
   })
-  expect(notify).toHaveBeenCalledWith('Task marked as active.')
+  expect(notify).toHaveBeenCalledWith('Task marked as open.')
 })
 
-it('ignores a toggle while busy', async () => {
+it('ignores a status change while busy', async () => {
   const { mutateAsync, notify } = setup({ busy: true })
   render(<TodosPage />)
-  await act(async () => listProps().onToggle(todoFixture))
+  await act(async () => listProps().onStatusChange(todoFixture, 'done'))
   expect(mutateAsync).not.toHaveBeenCalled()
   expect(notify).not.toHaveBeenCalled()
 })
 
-it('shows no notice when a toggle fails', async () => {
+it('shows no notice when a status change fails', async () => {
   const { mutateAsync, notify } = setup({
     mutateAsync: vi.fn().mockRejectedValue(new Error('Task not found.')),
   })
   render(<TodosPage />)
-  await act(async () => listProps().onToggle(todoFixture))
+  await act(async () => listProps().onStatusChange(todoFixture, 'done'))
   expect(mutateAsync).toHaveBeenCalledTimes(1)
   expect(notify).not.toHaveBeenCalled()
+})
+
+it('starts work on an open task', async () => {
+  const other = { ...todoFixture, id: Number.MAX_SAFE_INTEGER }
+  const { mutateAsync, notify } = setup({
+    mutateAsync: vi.fn().mockResolvedValue({ ...other, status: 'doing' }),
+  })
+  render(<TodosPage />)
+  await act(async () => listProps().onStatusChange(other, 'doing'))
+  expect(mutateAsync).toHaveBeenCalledExactlyOnceWith({
+    id: Number.MAX_SAFE_INTEGER,
+    input: { status: 'doing' },
+  })
+  expect(notify).toHaveBeenCalledExactlyOnceWith('Task marked as doing.')
+})
+
+it('announces the status the server saved, not the one requested', async () => {
+  const { notify } = setup({
+    mutateAsync: vi.fn().mockResolvedValue({ ...todoFixture, status: 'open' }),
+  })
+  render(<TodosPage />)
+  await act(async () => listProps().onStatusChange(todoFixture, 'done'))
+  expect(notify).toHaveBeenCalledExactlyOnceWith('Task marked as open.')
+})
+
+it('shows a failed status change in the page alert', () => {
+  setup({ mutationError: new Error('Please check the task details.') })
+  render(<TodosPage />)
+  expect(screen.getByTestId('alert')).toHaveTextContent(
+    'Please check the task details.',
+  )
+  expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
 })
 
 it('shows the mutation error before the query error and blocks retry while fetching', () => {

@@ -19,8 +19,9 @@ it('creates a Prisma client without connecting', () => {
 it('creates the todos table with the validator limits', async () => {
   const { database } = setup();
   const executeRaw = vi.spyOn(database, '$executeRaw').mockResolvedValue(0 as never);
+  vi.spyOn(database, '$transaction').mockResolvedValue([] as never);
   await initialize(database);
-  expect(executeRaw).toHaveBeenCalledOnce();
+  expect(executeRaw).toHaveBeenCalledTimes(4);
   const sql = (executeRaw.mock.calls[0][0] as unknown as TemplateStringsArray).join('');
   expect(sql).toContain('CREATE TABLE IF NOT EXISTS todos');
   expect(sql).toContain('title VARCHAR(120) NOT NULL CONSTRAINT todo_title_not_empty CHECK (length(title) >= 1)');
@@ -33,4 +34,38 @@ it('propagates a failed table creation', async () => {
   const { database } = setup();
   vi.spyOn(database, '$executeRaw').mockRejectedValue(new Error('permission denied for schema public'));
   await expect(initialize(database)).rejects.toThrow('permission denied for schema public');
+});
+
+const sqlOf = (call: unknown[]) => (call[0] as TemplateStringsArray).join('');
+
+it('migrates completed to a status column in one transaction after creating the table', async () => {
+  const { database } = setup();
+  const executeRaw = vi.spyOn(database, '$executeRaw')
+    .mockReturnValueOnce('create' as never).mockReturnValueOnce('add' as never)
+    .mockReturnValueOnce('backfill' as never).mockReturnValueOnce('constrain' as never);
+  const transaction = vi.spyOn(database, '$transaction').mockResolvedValue([] as never);
+  await initialize(database);
+  expect(transaction).toHaveBeenCalledOnce();
+  expect(transaction).toHaveBeenCalledWith(['add', 'backfill', 'constrain']);
+  expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(transaction.mock.invocationCallOrder[0]);
+  const [, add, backfill, constrain] = executeRaw.mock.calls.map(sqlOf);
+  expect(add).toContain('ALTER TABLE todos ADD COLUMN IF NOT EXISTS status VARCHAR(5)');
+  expect(add).toContain("CONSTRAINT todo_status CHECK (status IN ('open', 'doing', 'done'))");
+  expect(backfill).toBe("UPDATE todos SET status = CASE WHEN completed THEN 'done' ELSE 'open' END WHERE status IS NULL");
+  expect(constrain).toBe("ALTER TABLE todos ALTER COLUMN status SET DEFAULT 'open', ALTER COLUMN status SET NOT NULL");
+});
+
+it('passes no interpolated values into the migration SQL', async () => {
+  const { database } = setup();
+  const executeRaw = vi.spyOn(database, '$executeRaw').mockResolvedValue(0 as never);
+  vi.spyOn(database, '$transaction').mockResolvedValue([] as never);
+  await initialize(database);
+  for (const call of executeRaw.mock.calls) expect(call).toHaveLength(1);
+});
+
+it('propagates a failed status migration', async () => {
+  const { database } = setup();
+  vi.spyOn(database, '$executeRaw').mockResolvedValue(0 as never);
+  vi.spyOn(database, '$transaction').mockRejectedValue(new Error('check constraint "todo_status" is violated by some row'));
+  await expect(initialize(database)).rejects.toThrow('check constraint "todo_status" is violated by some row');
 });

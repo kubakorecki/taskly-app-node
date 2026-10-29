@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { formatDate, isOverdue, selectTodos, validateTodo } from './todos'
+import {
+  formatDate,
+  isActive,
+  isOverdue,
+  priorityLabels,
+  selectTodos,
+  statusLabels,
+  toOptions,
+  validateTodo,
+} from './todos'
 import type { Todo, TodoInput } from '../types'
 
 const base: Todo = {
@@ -7,7 +16,7 @@ const base: Todo = {
   title: 'Sprint plan',
   description: '',
   priority: 'medium',
-  completed: false,
+  status: 'open',
   due_date: null,
   created_at: '2026-10-01T12:00:00Z',
   updated_at: '2026-10-01T12:00:00Z',
@@ -18,7 +27,7 @@ describe('selectTodos', () => {
     const matching = { ...base, description: 'Discuss the API' }
     const todos = [
       matching,
-      { ...matching, id: 2, completed: true },
+      { ...matching, id: 2, status: 'done' as const },
       { ...base, id: 3 },
     ]
     expect(selectTodos(todos, 'active', ' api ', 'newest')).toEqual([matching])
@@ -31,9 +40,24 @@ describe('selectTodos', () => {
     expect(todos).toEqual([base, high])
   })
 
-  it('keeps only done tasks for the completed filter', () => {
-    const done = { ...base, id: 2, completed: true }
-    expect(selectTodos([base, done], 'completed', '', 'newest')).toEqual([done])
+  it('keeps only done tasks for the done filter', () => {
+    const done = { ...base, id: 2, status: 'done' as const }
+    expect(selectTodos([base, done], 'done', '', 'newest')).toEqual([done])
+  })
+
+  it('matches each status filter exactly and treats open and doing as active', () => {
+    const doing: Todo = { ...base, id: 2, status: 'doing' }
+    const done: Todo = { ...base, id: 3, status: 'done' }
+    const todos = [base, doing, done]
+    expect(selectTodos(todos, 'open', '', 'newest')).toEqual([base])
+    expect(selectTodos(todos, 'doing', '', 'newest')).toEqual([doing])
+    expect(selectTodos(todos, 'active', '', 'newest')).toEqual([doing, base])
+    expect(selectTodos(todos, 'all', '', 'newest')).toEqual([done, doing, base])
+  })
+
+  it('finds a task with HTML in its title by its literal text', () => {
+    const html: Todo = { ...base, id: 2, title: '<img src=x onerror=alert(1)>' }
+    expect(selectTodos([base, html], 'all', '<img', 'newest')).toEqual([html])
   })
 
   it('searches the title', () => {
@@ -77,7 +101,7 @@ describe('validateTodo', () => {
     description: '',
     priority: 'medium',
     due_date: null,
-    completed: false,
+    status: 'open',
   }
 
   it('accepts a valid task', () => {
@@ -134,10 +158,58 @@ describe('isOverdue', () => {
     vi.setSystemTime(new Date(2026, 9, 29, 0, 30))
     expect(isOverdue({ ...base, due_date: '2026-10-28' })).toBe(true)
     expect(isOverdue({ ...base, due_date: '2026-10-29' })).toBe(false)
-    expect(
-      isOverdue({ ...base, due_date: '2026-10-28', completed: true }),
-    ).toBe(false)
+    expect(isOverdue({ ...base, due_date: '2026-10-28', status: 'done' })).toBe(
+      false,
+    )
     expect(isOverdue(base)).toBe(false)
+  })
+
+  it('flags a doing task due before the local today', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 9, 29, 23, 30))
+    expect(
+      isOverdue({ ...base, due_date: '2026-10-28', status: 'doing' }),
+    ).toBe(true)
+    expect(
+      isOverdue({ ...base, due_date: '2026-10-29', status: 'doing' }),
+    ).toBe(false)
+  })
+})
+
+describe('isActive', () => {
+  it.each([
+    ['open', true],
+    ['doing', true],
+    ['done', false],
+  ] as const)('treats a %s task as active: %s', (status, active) => {
+    expect(isActive({ ...base, status })).toBe(active)
+  })
+})
+
+describe('statusLabels and toOptions', () => {
+  it('labels every status in lifecycle order', () => {
+    expect(statusLabels).toEqual({ open: 'Open', doing: 'Doing', done: 'Done' })
+    expect(toOptions(statusLabels)).toEqual([
+      { value: 'open', label: 'Open' },
+      { value: 'doing', label: 'Doing' },
+      { value: 'done', label: 'Done' },
+    ])
+  })
+
+  it('turns any label map into select options and an empty map into none', () => {
+    expect(toOptions(priorityLabels)).toEqual([
+      { value: 'low', label: 'Low' },
+      { value: 'medium', label: 'Medium' },
+      { value: 'high', label: 'High' },
+    ])
+    expect(toOptions({})).toEqual([])
+  })
+
+  it('keeps only own labels, never inherited prototype keys', () => {
+    const labels = Object.assign(Object.create({ admin: 'Admin' }), {
+      open: 'Open',
+    }) as Record<string, string>
+    expect(toOptions(labels)).toEqual([{ value: 'open', label: 'Open' }])
   })
 })
 

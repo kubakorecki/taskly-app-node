@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { todoFixture } from '../../../test/todoFixture'
-import type { Todo } from '../types'
+import type { Status, Todo } from '../types'
 import { TodoEmptyState } from './TodoEmptyState'
 import { TodoList } from './TodoList'
 
@@ -14,20 +14,21 @@ vi.mock('./TodoItem', () => ({
   TodoItem: ({
     todo,
     busy,
-    onToggle,
+    onStatusChange,
     onEdit,
     onDelete,
   }: {
     todo: Todo
     busy: boolean
-    onToggle: () => void
+    onStatusChange: (status: Status) => void
     onEdit: () => void
     onDelete: () => void
   }) => (
     <li>
       {todo.title}
       {busy && ' (busy)'}
-      <button onClick={onToggle}>Toggle {todo.id}</button>
+      <button onClick={() => onStatusChange('doing')}>Start {todo.id}</button>
+      <button onClick={() => onStatusChange('done')}>Finish {todo.id}</button>
       <button onClick={onEdit}>Edit {todo.id}</button>
       <button onClick={onDelete}>Delete {todo.id}</button>
     </li>
@@ -37,7 +38,7 @@ beforeEach(() => vi.clearAllMocks())
 
 const callbacks = () => ({
   onCreate: vi.fn(),
-  onToggle: vi.fn(),
+  onStatusChange: vi.fn(),
   onEdit: vi.fn(),
   onDelete: vi.fn(),
 })
@@ -49,7 +50,7 @@ it('shows loading feedback before showing an empty list', () => {
     failed: false,
     busy: false,
     onCreate: vi.fn(),
-    onToggle: vi.fn(),
+    onStatusChange: vi.fn(),
     onEdit: vi.fn(),
     onDelete: vi.fn(),
   }
@@ -100,16 +101,55 @@ it('keeps showing cached tasks after a failed refetch and forwards each task', a
   expect(screen.getByText(/Ship release/)).toHaveTextContent(
     'Ship release (busy)',
   )
-  await user.click(screen.getByRole('button', { name: 'Toggle 8' }))
-  expect(props.onToggle).toHaveBeenCalledWith(other)
+  await user.click(screen.getByRole('button', { name: 'Start 8' }))
+  expect(props.onStatusChange).toHaveBeenCalledWith(other, 'doing')
   await user.click(screen.getByRole('button', { name: 'Edit 7' }))
   expect(props.onEdit).toHaveBeenCalledWith(todoFixture)
   await user.click(screen.getByRole('button', { name: 'Delete 8' }))
   expect(props.onDelete).toHaveBeenCalledWith(other)
-  expect(props.onToggle).toHaveBeenCalledTimes(1)
+  expect(props.onStatusChange).toHaveBeenCalledTimes(1)
   expect(props.onEdit).toHaveBeenCalledTimes(1)
   expect(props.onDelete).toHaveBeenCalledTimes(1)
   expect(props.onCreate).not.toHaveBeenCalled()
+})
+
+it('forwards the chosen status together with its own task', async () => {
+  const user = userEvent.setup()
+  const other: Todo = { ...todoFixture, id: 8, title: 'Ship release' }
+  const props = callbacks()
+  render(
+    <TodoList
+      todos={[todoFixture, other]}
+      hasTodos
+      loading={false}
+      failed={false}
+      busy={false}
+      {...props}
+    />,
+  )
+  await user.click(screen.getByRole('button', { name: 'Finish 7' }))
+  expect(props.onStatusChange).toHaveBeenCalledExactlyOnceWith(
+    todoFixture,
+    'done',
+  )
+  expect(props.onEdit).not.toHaveBeenCalled()
+  expect(props.onDelete).not.toHaveBeenCalled()
+})
+
+it('renders the title of each task as text', () => {
+  const html = '<img src=x onerror=alert(1)>'
+  const { container } = render(
+    <TodoList
+      todos={[{ ...todoFixture, title: html }]}
+      hasTodos
+      loading={false}
+      failed={false}
+      busy={false}
+      {...callbacks()}
+    />,
+  )
+  expect(screen.getByRole('listitem')).toHaveTextContent(html)
+  expect(container.querySelector('img')).toBeNull()
 })
 
 it('passes the filter state and busy flag to the empty state', () => {
