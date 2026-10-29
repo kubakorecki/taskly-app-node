@@ -87,10 +87,10 @@ Mandatory for every module under test. For each item, either a test covers it, o
 
 ## Formatting
 
-After writing or editing test files, format exactly those files from the repo root:
+After writing or editing test files, format exactly those files from the repo root. The wrapper runs the frontend's Prettier in a clean environment and accepts only test files:
 
 ```sh
-frontend/node_modules/.bin/prettier --write frontend/src/features/todos/components/TodoItem.test.tsx
+scripts/agent-prettier.sh frontend/src/features/todos/components/TodoItem.test.tsx
 ```
 
 The code blocks above are condensed. Prettier rewraps them to the repo's style, so `format:check` stays green.
