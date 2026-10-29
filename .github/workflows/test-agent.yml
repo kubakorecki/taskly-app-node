@@ -4,7 +4,8 @@ name: test-agent
 # every side effect around it (docs/adr/0001). `generate` runs the agent with the Claude token and read-only
 # contents; it uploads a patch, the report and the transcript. `verify` runs the suites with the patch and no
 # secrets. `publish` holds the GitHub App's token and runs no PR or agent code: it checks the patch, commits it,
-# and reports on the PR.
+# and reports on the PR. A Backfill run's commit goes to test-agent/backfill-<scope>, with the report as the
+# body of that branch's PR.
 
 on:
   pull_request:
@@ -24,12 +25,13 @@ on:
 
 permissions: {}
 
-# Events a bot sends get a group of their own: the App's push to a PR must not cancel the run that made it.
+# Events a bot sends get a group of their own: the App's push to a PR must not cancel the run that made it. A
+# second Backfill run waits instead: cancelled between its push and its PR, a run would leave a branch with no PR.
 concurrency:
   group: >-
     test-agent-${{ github.event.sender.type == 'Bot' && github.run_id ||
     github.event.pull_request.number || format('backfill-{0}', inputs.scope) }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   # Fork PRs get no secrets, and their GITHUB_TOKEN can't comment, so the note goes in the run itself.
@@ -321,8 +323,8 @@ jobs:
 
   # The only job with a write token. It runs nothing from the PR or the agent: the test code ran in verify, where
   # it could plant git hooks or step environment for later steps. It applies and checks the patch itself, commits
-  # and pushes with the App, updates the sticky comment and sets the test-agent check. It runs whenever generate
-  # did, so a failure upstream still reports a neutral check.
+  # and pushes with the App, updates the sticky comment and sets the test-agent check, or for a Backfill run opens
+  # the PR and fails the run unless it passed. It runs whenever generate did, so a failure upstream still reports.
   publish:
     needs: [generate, verify]
     if: ${{ !cancelled() && needs.generate.result != 'skipped' }}
@@ -336,7 +338,8 @@ jobs:
       MODE: ${{ github.event_name == 'workflow_dispatch' && 'backfill' || 'pr' }}
       TRUSTED_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      # The branch the commit goes to: the PR's head, or the Backfill run's own branch.
+      PUSH_REF: ${{ github.event.pull_request.head.ref || format('test-agent/backfill-{0}', inputs.scope) }}
       PR: ${{ github.event.pull_request.number }}
       TARGET_COUNT: ${{ needs.generate.outputs.target-count }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -396,10 +399,12 @@ jobs:
           echo "commit=$(jq .commit "$OUT/verdict.json")" >> "$GITHUB_OUTPUT"
 
       # The message is fixed: text from the agent could hold [skip ci]. Pushing with the App's token runs CI on
-      # the commit, and the [test-agent] trailer marks it (docs/adr/0002).
+      # the commit, and the [test-agent] trailer marks it (docs/adr/0002). A Backfill run pushes to its own
+      # branch, and never with force: a branch that isn't an ancestor of the dispatched commit may hold review
+      # fixes, so the push fails instead.
       - name: Commit and push
         id: push
-        if: steps.decide.outputs.commit == 'true' && env.MODE == 'pr'
+        if: steps.decide.outputs.commit == 'true'
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           APP_SLUG: ${{ steps.app.outputs.app-slug }}
@@ -408,10 +413,14 @@ jobs:
           bot_id=$(gh api "users/$APP_SLUG%5Bbot%5D" --jq .id)
           git -c user.name="$bot" -c user.email="$bot_id+$bot@users.noreply.github.com" commit -q --no-verify \
             -m 'Add unit tests from the test agent' -m "$RUN_URL" -m '[test-agent]'
-          if git push --no-verify origin "HEAD:refs/heads/$HEAD_REF"; then
+          if git push --no-verify origin "HEAD:refs/heads/$PUSH_REF"; then
             echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           else
-            echo '::error::The push failed'
+            message='The push failed'
+            if [[ $MODE == backfill ]]; then
+              message+=". If $PUSH_REF has commits the dispatched one lacks, dispatch the run on $PUSH_REF to continue it, or delete the branch to start over."
+            fi
+            echo "::error::$message"
             echo 'sha=failed' >> "$GITHUB_OUTPUT"
           fi
 
@@ -422,6 +431,27 @@ jobs:
         run: |
           "$SCRIPTS/test-agent-render.sh" "$OUT" > "$OUT/verdict.json"
           jq -r .body "$OUT/verdict.json" >> "$GITHUB_STEP_SUMMARY"
+
+      # Into the branch the run was dispatched on, or the default branch when it was dispatched on a tag or on a
+      # Backfill run's branch to continue it. A later run replaces the body with its own report.
+      - name: Open or update the Backfill run's PR
+        if: env.MODE == 'backfill' && steps.push.outcome == 'success' && steps.push.outputs.sha != 'failed'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SCOPE: ${{ inputs.scope }}
+          BASE_REF: >-
+            ${{ github.ref_type == 'branch' && !startsWith(github.ref_name, 'test-agent/backfill-') && github.ref_name ||
+            github.event.repository.default_branch }}
+        run: |
+          number=$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f head="$GITHUB_REPOSITORY_OWNER:$PUSH_REF" \
+            --jq '.[0].number // empty')
+          if [[ -n $number ]]; then
+            jq '{body}' "$OUT/verdict.json" | gh api -X PATCH "repos/$GITHUB_REPOSITORY/pulls/$number" --input - --silent
+          else
+            jq --arg title "Backfill unit tests for $SCOPE" --arg head "$PUSH_REF" --arg base "$BASE_REF" \
+              '{title: $title, head: $head, base: $base, body}' "$OUT/verdict.json" |
+              gh api "repos/$GITHUB_REPOSITORY/pulls" --input - --jq .html_url
+          fi
 
       # The comment is the App's comment that starts with the marker. A PR with nothing to test gets none, unless
       # an earlier run left one.
@@ -463,3 +493,10 @@ jobs:
             status: "completed", conclusion: "neutral",
             output: {title: "The publish job failed", summary: "The [workflow run](\($url)) has the details."}}' |
             gh api "repos/$GITHUB_REPOSITORY/check-runs" --input - --silent
+
+      # A Backfill run has no check, so the run's own result reports the verdict.
+      - name: Fail a Backfill run that didn't pass
+        if: ${{ !cancelled() && env.MODE == 'backfill' && steps.render.outcome == 'success' }}
+        run: |
+          jq -e '.conclusion == "success"' "$OUT/verdict.json" > /dev/null ||
+            { echo "::error::$(jq -r .title "$OUT/verdict.json")"; exit 1; }
