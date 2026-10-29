@@ -6,6 +6,7 @@
 #
 # Reads from <dir>, where a missing or unreadable file means that step didn't finish:
 #   test-agent-manifest.json, test-agent-report.json   the generate job's output
+#   agent-result.json                                  the generate job's output: the CLI's last result event
 #   patch-check.json                                   scripts/test-agent-apply-patch.sh, run by the publish job
 #   test-agent-results.json                            scripts/test-agent-results.sh, run by the verify job
 # and from the environment: RUN_URL, TRANSCRIPT_URL (may be empty), REPO_URL, AGENT (the agent step's outcome)
@@ -26,7 +27,8 @@ usage() {
 
 # Files go in with --slurpfile: a manifest holds up to 25 patches of 64 KiB, too long for one argument.
 args=()
-for input in manifest:test-agent-manifest.json report:test-agent-report.json patch_check:patch-check.json results:test-agent-results.json; do
+for input in manifest:test-agent-manifest.json report:test-agent-report.json agent_result:agent-result.json \
+  patch_check:patch-check.json results:test-agent-results.json; do
   file=$1/${input#*:}
   jq -e 'type == "object"' "$file" >/dev/null 2>&1 || file=/dev/null
   args+=(--slurpfile "${input%%:*}" "$file")
