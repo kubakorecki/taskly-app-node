@@ -134,3 +134,13 @@ Coverage — `backend/coverage/index.html`:
 ```sh
 npm run test:coverage
 ```
+
+## Test agent setup
+
+One-time, as a repo admin with `gh` logged in. The wizard walks you through creating the GitHub App the workflow pushes the test agent's commits with, stores `TEST_AGENT_APP_ID`, `TEST_AGENT_APP_PRIVATE_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`, protects `main` and creates the `skip-test-agent` label:
+
+```sh
+scripts/setup-test-agent.sh
+```
+
+Re-running it is safe: it asks before replacing a stored value or the protection on `main`, and leaves an existing label alone.
