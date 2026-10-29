@@ -1,0 +1,502 @@
+name: test-agent
+
+# The test agent writes unit tests for a PR (PR run) or for one package (Backfill run), and this workflow owns
+# every side effect around it (docs/adr/0001). `generate` runs the agent with the Claude token and read-only
+# contents; it uploads a patch, the report and the transcript. `verify` runs the suites with the patch and no
+# secrets. `publish` holds the GitHub App's token and runs no PR or agent code: it checks the patch, commits it,
+# and reports on the PR. A Backfill run's commit goes to test-agent/backfill-<scope>, with the report as the
+# body of that branch's PR.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Backfill run scope
+        type: choice
+        options: [backend, frontend]
+        required: true
+      model:
+        description: Model for the test agent
+        type: choice
+        options: [claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5]
+        default: claude-opus-5-5
+
+permissions: {}
+
+# Events a bot sends get a group of their own: the App's push to a PR must not cancel the run that made it. A
+# second Backfill run waits instead: cancelled between its push and its PR, a run would leave a branch with no PR.
+concurrency:
+  group: >-
+    test-agent-${{ github.event.sender.type == 'Bot' && github.run_id ||
+    github.event.pull_request.number || format('backfill-{0}', inputs.scope) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  # Fork PRs get no secrets, and their GITHUB_TOKEN can't comment, so the note goes in the run itself.
+  fork-note:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          note='The test agent does not run on pull requests from forks. A maintainer can push the branch to this repository to run it.'
+          echo "::notice title=Test agent skipped::$note"
+          echo "$note" >> "$GITHUB_STEP_SUMMARY"
+
+  generate:
+    # PR runs skip forks, drafts, the skip-test-agent label, and events whose sender is a GitHub Bot account.
+    # The test agent's App pushes as one, so its own commits never start another run (docs/adr/0002).
+    if: >-
+      github.event_name == 'workflow_dispatch' || (
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        !github.event.pull_request.draft &&
+        !contains(github.event.pull_request.labels.*.name, 'skip-test-agent') &&
+        github.event.sender.type != 'Bot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      target-count: ${{ steps.manifest.outputs.target-count }}
+      agent: ${{ steps.agent.outcome }}
+      transcript-url: ${{ steps.transcript.outputs.artifact-url }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      MODE: ${{ github.event_name == 'workflow_dispatch' && 'backfill' || 'pr' }}
+      SCOPE: ${{ inputs.scope }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      # Full history for base...head. The agent can read .git, so no credentials are left in it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # A PR can rewrite the agent, its skills, guard and wrappers, or add Claude settings, hooks, MCP servers
+      # and CLAUDE.md files. The agent runs with the base branch's version of all of them.
+      - name: Use the base branch's agent files
+        if: env.MODE == 'pr'
+        run: |
+          git diff --no-renames --name-only -z "$BASE_SHA" HEAD -- scripts .mcp.json ':(glob)**/.claude/**' \
+            ':(glob)**/CLAUDE.md' ':(glob)**/CLAUDE.local.md' ':(glob)**/AGENTS.md' |
+            while IFS= read -r -d '' file; do
+              if git cat-file -e "$BASE_SHA:$file" 2>/dev/null; then git checkout -q "$BASE_SHA" -- "$file"; else git rm -q -- "$file"; fi
+            done
+          if [[ ! -f .claude/agents/unit-test-agent.md || ! -x scripts/test-agent-manifest.sh ]]; then
+            echo '::error::The base branch has no test agent yet, so it runs once this workflow is merged'
+            exit 1
+          fi
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Find the packages to measure
+        id: packages
+        run: |
+          if [[ $MODE == pr ]]; then
+            packages=$(scripts/test-agent-manifest.sh pr "$BASE_SHA" "$HEAD_SHA" |
+              jq -r '[.files[] | select(.change != "deleted") | .kind | select(. == "backend" or . == "frontend")] | unique | join(" ")')
+          else
+            packages=$SCOPE
+          fi
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
+
+      # The baseline is coverage at head with the existing tests. Failed tests and missed thresholds still write the summary.
+      - name: Install and measure the baseline
+        env:
+          PACKAGES: ${{ steps.packages.outputs.packages }}
+        run: |
+          for package in $PACKAGES; do
+            (cd "$package" && npm ci)
+            scripts/agent-vitest.sh "$package" --coverage --coverage.reporter=json-summary --coverage.reportOnFailure --reporter=dot ||
+              echo "::warning::The $package baseline run failed. The baseline covers the tests that ran."
+          done
+
+      - name: Write the manifest
+        id: manifest
+        run: |
+          if [[ $MODE == pr ]]; then
+            scripts/test-agent-manifest.sh pr "$BASE_SHA" "$HEAD_SHA" > test-agent-manifest.json
+          else
+            scripts/test-agent-manifest.sh backfill "$SCOPE" > test-agent-manifest.json
+          fi
+          count=$(jq '[.files[] | select((.kind == "backend" or .kind == "frontend") and .change != "deleted")] | length' test-agent-manifest.json)
+          echo "target-count=$count" >> "$GITHUB_OUTPUT"
+          echo "Source files for the test agent: $count, over the cap: $(jq '.overflow | length' test-agent-manifest.json)" >> "$GITHUB_STEP_SUMMARY"
+
+      # The patch is what the agent changes from here, so restored agent files aren't part of it.
+      - name: Snapshot the working tree
+        id: snapshot
+        run: |
+          printf '%s\n' /test-agent-manifest.json /test-agent-report.json node_modules/ coverage/ >> .git/info/exclude
+          git add -A
+          echo "tree=$(git write-tree)" >> "$GITHUB_OUTPUT"
+          # Outside the repo, where the agent can't read or write.
+          echo "OUT=$RUNNER_TEMP/test-agent" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/test-agent"
+
+      - name: Install Claude Code
+        if: steps.manifest.outputs.target-count != '0'
+        run: npm install -g @anthropic-ai/claude-code@2.1.312
+
+      # Two layers: the agent's guard hook (scripts/agent-guard.sh) and this allowlist, with everything else
+      # denied. A run cut short leaves a report with finished: false, which the publish job still uses.
+      - name: Run the test agent
+        id: agent
+        if: steps.manifest.outputs.target-count != '0'
+        continue-on-error: true
+        timeout-minutes: 30
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          MODEL: ${{ inputs.model }}
+          DISABLE_AUTOUPDATER: '1'
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+        run: |
+          claude -p 'Run the test agent on test-agent-manifest.json.' \
+            --agent unit-test-agent ${MODEL:+--model "$MODEL"} --max-turns 40 \
+            --permission-mode dontAsk \
+            --allowedTools Read Glob Grep Edit Write 'Bash(scripts/agent-vitest.sh:*)' 'Bash(scripts/agent-prettier.sh:*)' \
+            --strict-mcp-config --no-session-persistence \
+            --output-format stream-json --verbose --include-hook-events \
+            > "$OUT/transcript.jsonl"
+
+      # Agent frontmatter hooks need a trusted workspace. Headless runs skip the trust check, so the guard should
+      # fire on every tool call, but a run where it didn't must never be published. The base branch's .claude is
+      # restored above, so the guard is the only PreToolUse hook.
+      - name: Check the guard ran on every tool call
+        id: guard
+        if: ${{ !cancelled() && steps.agent.outcome != 'skipped' }}
+        run: |
+          read -r calls checks < <(jq -rs '[
+            ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .id] | unique | length),
+            ([.[] | select(.type == "system" and .subtype == "hook_response" and .hook_event == "PreToolUse")] | length)
+          ] | @tsv' "$OUT/transcript.jsonl")
+          echo "Tool calls: $calls, guard checks: $checks"
+          (( checks >= calls )) || { echo "::error::The guard hook ran on $checks of $calls tool calls"; exit 1; }
+
+      # Test code from the PR runs as the same user as Claude Code and could read the token from /proc (an
+      # accepted risk), so output that holds it is never uploaded.
+      - name: Collect the outputs
+        id: collect
+        if: ${{ !cancelled() && steps.manifest.outcome == 'success' }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          TREE: ${{ steps.snapshot.outputs.tree }}
+        run: |
+          git add -A
+          git diff --cached --binary "$TREE" > "$OUT/test-agent.patch"
+          cp test-agent-manifest.json "$OUT/"
+          [[ ! -f test-agent-report.json ]] || cp test-agent-report.json "$OUT/"
+          if [[ -n $CLAUDE_CODE_OAUTH_TOKEN ]] && grep -rqF -- "$CLAUDE_CODE_OAUTH_TOKEN" "$OUT"; then
+            echo '::error::The agent output contains the Claude token, so nothing is uploaded'
+            exit 1
+          fi
+          git diff --cached --stat "$TREE"
+
+      - name: Upload the transcript
+        id: transcript
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' && steps.agent.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-agent-transcript
+          path: ${{ env.OUT }}/transcript.jsonl
+          retention-days: 30
+
+      - name: Upload the patch and report
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' && steps.guard.outcome != 'failure' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-agent-output
+          path: |
+            ${{ env.OUT }}/test-agent.patch
+            ${{ env.OUT }}/test-agent-manifest.json
+            ${{ env.OUT }}/test-agent-report.json
+          retention-days: 30
+
+  # Runs both suites with coverage, the typechecks and format:check on the head commit with the agent's patch.
+  # PR code and the agent's tests run here, so the job holds no secret, and the publish job only reports what it
+  # finds: it checks the patch itself.
+  verify:
+    needs: generate
+    if: ${{ !cancelled() && needs.generate.outputs.target-count != '' && needs.generate.outputs.target-count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      TRUSTED_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: test-agent-output
+          path: ${{ runner.temp }}/test-agent
+
+      # The PR's own scripts are tested like any other code, so they stay in the working tree.
+      - name: Use the base branch's scripts
+        run: |
+          mkdir -p "$RUNNER_TEMP/base"
+          git archive "$TRUSTED_SHA" scripts | tar -x -C "$RUNNER_TEMP/base"
+          echo "SCRIPTS=$RUNNER_TEMP/base/scripts" >> "$GITHUB_ENV"
+          echo "OUT=$RUNNER_TEMP/test-agent" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      # A failed list leaves no file, and the test count reports unknown.
+      - name: Install and count the tests at head
+        id: install
+        run: |
+          for package in backend frontend; do
+            (cd "$package" && npm ci)
+            (cd "$package" && npx vitest list --json="$OUT/$package-list-before.json") ||
+              echo "::warning::The $package tests at head failed to load"
+          done
+
+      - name: Apply the patch
+        id: patch
+        run: |
+          "$SCRIPTS/test-agent-apply-patch.sh" "$OUT/test-agent.patch"
+
+      - name: Run the checks
+        if: steps.patch.outcome == 'success'
+        run: |
+          mkdir -p "$OUT/checks"
+          # Keeps each check's exit code and output for test-agent-results.sh, and goes on after a failure.
+          check() {
+            local name=$1 status=0
+            shift
+            "$@" > "$OUT/checks/$name.log" 2>&1 || status=$?
+            echo "$status" > "$OUT/checks/$name.exit"
+            echo "::group::$name (exit $status)"
+            cat "$OUT/checks/$name.log"
+            echo '::endgroup::'
+          }
+          for package in backend frontend; do
+            (cd "$package" && npx vitest list --json="$OUT/$package-list-after.json") ||
+              echo "::warning::The $package tests with the patch failed to load"
+            check "$package-typecheck" npm --prefix "$package" run typecheck
+            if [[ $package == frontend ]]; then check frontend-format npm --prefix frontend run format:check; fi
+            check "$package-tests" npm --prefix "$package" run test:coverage -- --coverage.reportOnFailure \
+              --reporter=default --reporter=json --outputFile.json="$OUT/$package-vitest.json"
+          done
+
+      - name: Collect the results
+        id: results
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          "$SCRIPTS/test-agent-results.sh" "$OUT" > "$OUT/test-agent-results.json"
+          jq -c '.testCounts, .checks[] | del(.log)' "$OUT/test-agent-results.json"
+
+      - name: Upload the results
+        if: ${{ !cancelled() && steps.results.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-agent-results
+          path: ${{ env.OUT }}/test-agent-results.json
+          retention-days: 30
+
+  # The only job with a write token. It runs nothing from the PR or the agent: the test code ran in verify, where
+  # it could plant git hooks or step environment for later steps. It applies and checks the patch itself, commits
+  # and pushes with the App, updates the sticky comment and sets the test-agent check, or for a Backfill run opens
+  # the PR and fails the run unless it passed. It runs whenever generate did, so a failure upstream still reports.
+  publish:
+    needs: [generate, verify]
+    if: ${{ !cancelled() && needs.generate.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    defaults:
+      run:
+        shell: bash
+    env:
+      MODE: ${{ github.event_name == 'workflow_dispatch' && 'backfill' || 'pr' }}
+      TRUSTED_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      # The branch the commit goes to: the PR's head, or the Backfill run's own branch.
+      PUSH_REF: ${{ github.event.pull_request.head.ref || format('test-agent/backfill-{0}', inputs.scope) }}
+      PR: ${{ github.event.pull_request.number }}
+      TARGET_COUNT: ${{ needs.generate.outputs.target-count }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+      TRANSCRIPT_URL: ${{ needs.generate.outputs.transcript-url }}
+      AGENT: ${{ needs.generate.outputs.agent }}
+    steps:
+      # Scoped to this repository.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app
+        with:
+          app-id: ${{ vars.TEST_AGENT_APP_ID }}
+          private-key: ${{ secrets.TEST_AGENT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-checks: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          fetch-depth: 0
+          token: ${{ steps.app.outputs.token }}
+
+      # A missing artifact is a step that didn't finish upstream, which test-agent-render.sh reports as neutral.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: test-agent-output
+          path: ${{ runner.temp }}/test-agent
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.verify.result != 'skipped'
+        continue-on-error: true
+        with:
+          name: test-agent-results
+          path: ${{ runner.temp }}/test-agent
+
+      - name: Use the base branch's scripts
+        run: |
+          mkdir -p "$RUNNER_TEMP/base" "$RUNNER_TEMP/test-agent"
+          git archive "$TRUSTED_SHA" scripts | tar -x -C "$RUNNER_TEMP/base"
+          echo "SCRIPTS=$RUNNER_TEMP/base/scripts" >> "$GITHUB_ENV"
+          echo "OUT=$RUNNER_TEMP/test-agent" >> "$GITHUB_ENV"
+
+      # Without a patch, or when it doesn't apply, patch-check.json stays empty.
+      - name: Apply and check the patch
+        run: |
+          "$SCRIPTS/test-agent-apply-patch.sh" "$OUT/test-agent.patch" > "$OUT/patch-check.json" || true
+          cat "$OUT/patch-check.json"
+
+      # The renderer decides the check and the commit; it runs again once the push result is known.
+      - name: Decide
+        id: decide
+        run: |
+          "$SCRIPTS/test-agent-render.sh" "$OUT" > "$OUT/verdict.json"
+          jq -c 'del(.body)' "$OUT/verdict.json"
+          echo "commit=$(jq .commit "$OUT/verdict.json")" >> "$GITHUB_OUTPUT"
+
+      # The message is fixed: text from the agent could hold [skip ci]. Pushing with the App's token runs CI on
+      # the commit, and the [test-agent] trailer marks it (docs/adr/0002). A Backfill run pushes to its own
+      # branch, and never with force: a branch that isn't an ancestor of the dispatched commit may hold review
+      # fixes, so the push fails instead.
+      - name: Commit and push
+        id: push
+        if: steps.decide.outputs.commit == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          bot="${APP_SLUG}[bot]"
+          bot_id=$(gh api "users/$APP_SLUG%5Bbot%5D" --jq .id)
+          git -c user.name="$bot" -c user.email="$bot_id+$bot@users.noreply.github.com" commit -q --no-verify \
+            -m 'Add unit tests from the test agent' -m "$RUN_URL" -m '[test-agent]'
+          if git push --no-verify origin "HEAD:refs/heads/$PUSH_REF"; then
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            message='The push failed'
+            if [[ $MODE == backfill ]]; then
+              message+=". If $PUSH_REF has commits the dispatched one lacks, dispatch the run on $PUSH_REF to continue it, or delete the branch to start over."
+            fi
+            echo "::error::$message"
+            echo 'sha=failed' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Render the report
+        id: render
+        env:
+          PUSH: ${{ steps.push.outputs.sha }}
+        run: |
+          "$SCRIPTS/test-agent-render.sh" "$OUT" > "$OUT/verdict.json"
+          jq -r .body "$OUT/verdict.json" >> "$GITHUB_STEP_SUMMARY"
+
+      # Into the branch the run was dispatched on, or the default branch when it was dispatched on a tag or on a
+      # Backfill run's branch to continue it. A later run replaces the body with its own report.
+      - name: Open or update the Backfill run's PR
+        if: env.MODE == 'backfill' && steps.push.outcome == 'success' && steps.push.outputs.sha != 'failed'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SCOPE: ${{ inputs.scope }}
+          BASE_REF: >-
+            ${{ github.ref_type == 'branch' && !startsWith(github.ref_name, 'test-agent/backfill-') && github.ref_name ||
+            github.event.repository.default_branch }}
+        run: |
+          number=$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f head="$GITHUB_REPOSITORY_OWNER:$PUSH_REF" \
+            --jq '.[0].number // empty')
+          if [[ -n $number ]]; then
+            jq '{body}' "$OUT/verdict.json" | gh api -X PATCH "repos/$GITHUB_REPOSITORY/pulls/$number" --input - --silent
+          else
+            jq --arg title "Backfill unit tests for $SCOPE" --arg head "$PUSH_REF" --arg base "$BASE_REF" \
+              '{title: $title, head: $head, base: $base, body}' "$OUT/verdict.json" |
+              gh api "repos/$GITHUB_REPOSITORY/pulls" --input - --jq .html_url
+          fi
+
+      # The comment is the App's comment that starts with the marker. A PR with nothing to test gets none, unless
+      # an earlier run left one.
+      - name: Update the sticky comment
+        if: env.MODE == 'pr'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --jq \
+            ".[] | select(.user.login == \"${APP_SLUG}[bot]\" and (.body | startswith(\"<!-- test-agent -->\"))) | .id")
+          id=${ids%%$'\n'*}
+          if [[ -n $id ]]; then
+            jq '{body}' "$OUT/verdict.json" | gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" --input - --silent
+          elif [[ $TARGET_COUNT != 0 ]]; then
+            jq '{body}' "$OUT/verdict.json" | gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --input - --silent
+          fi
+
+      # On the pushed commit, which is the PR's head now, or else on the head the run tested.
+      - name: Set the test-agent check
+        id: check
+        if: ${{ !cancelled() && env.MODE == 'pr' && steps.render.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          PUSH: ${{ steps.push.outputs.sha }}
+        run: |
+          sha=$HEAD_SHA
+          [[ ! $PUSH =~ ^[0-9a-f]{40}$ ]] || sha=$PUSH
+          jq --arg sha "$sha" --arg url "$RUN_URL" '{name: "test-agent", head_sha: $sha, details_url: $url, status: "completed",
+            conclusion, output: {title, summary: (.body | ltrimstr("<!-- test-agent -->\n"))}}' "$OUT/verdict.json" |
+            gh api "repos/$GITHUB_REPOSITORY/check-runs" --input - --silent
+
+      - name: Report an infrastructure failure
+        if: failure() && steps.app.outputs.token != '' && env.MODE == 'pr' && steps.check.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          jq -n --arg sha "$HEAD_SHA" --arg url "$RUN_URL" '{name: "test-agent", head_sha: $sha, details_url: $url,
+            status: "completed", conclusion: "neutral",
+            output: {title: "The publish job failed", summary: "The [workflow run](\($url)) has the details."}}' |
+            gh api "repos/$GITHUB_REPOSITORY/check-runs" --input - --silent
+
+      # A Backfill run has no check, so the run's own result reports the verdict.
+      - name: Fail a Backfill run that didn't pass
+        if: ${{ !cancelled() && env.MODE == 'backfill' && steps.render.outcome == 'success' }}
+        run: |
+          jq -e '.conclusion == "success"' "$OUT/verdict.json" > /dev/null ||
+            { echo "::error::$(jq -r .title "$OUT/verdict.json")"; exit 1; }
