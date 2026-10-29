@@ -1,7 +1,16 @@
-import type { Filter, Sort, Todo, TodoInput } from '../types'
+import type { Filter, Sort, Status, Todo, TodoInput } from '../types'
 
 export const priorityLabels = { low: 'Low', medium: 'Medium', high: 'High' }
+export const statusLabels: Record<Status, string> = {
+  open: 'Open',
+  doing: 'Doing',
+  done: 'Done',
+}
 const priorityOrder = { high: 0, medium: 1, low: 2 }
+
+export function toOptions(labels: Record<string, string>) {
+  return Object.entries(labels).map(([value, label]) => ({ value, label }))
+}
 
 export function validateTodo(input: TodoInput): Record<string, string> {
   const errors: Record<string, string> = {}
@@ -34,7 +43,7 @@ export function selectTodos(
     .filter((todo) => {
       const statusMatches =
         filter === 'all' ||
-        (filter === 'completed' ? todo.completed : !todo.completed)
+        (filter === 'active' ? isActive(todo) : todo.status === filter)
       return (
         statusMatches &&
         `${todo.title} ${todo.description}`
@@ -56,10 +65,14 @@ export function selectTodos(
     })
 }
 
+export function isActive(todo: Todo): boolean {
+  return todo.status !== 'done'
+}
+
 export function isOverdue(todo: Todo): boolean {
   const today = new Date()
   const localDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-  return !todo.completed && !!todo.due_date && todo.due_date < localDate
+  return isActive(todo) && !!todo.due_date && todo.due_date < localDate
 }
 
 export function formatDate(date: string): string {

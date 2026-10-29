@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import type { TodoInput } from '../types'
-import { priorityLabels, validateTodo } from '../utils/todos'
+import { priorityLabels, toOptions, validateTodo } from '../utils/todos'
 import { Alert, Button, Input, Select, Text } from '../../../design-system'
 
 const emptyTodo: TodoInput = {
@@ -8,7 +8,7 @@ const emptyTodo: TodoInput = {
   description: '',
   priority: 'medium',
   due_date: null,
-  completed: false,
+  status: 'open',
 }
 
 export function TodoForm({
@@ -76,10 +76,7 @@ export function TodoForm({
               label="Priority"
               value={values.priority}
               onChange={(e) => change('priority', e.target.value)}
-              options={Object.entries(priorityLabels).map(([value, label]) => ({
-                value,
-                label,
-              }))}
+              options={toOptions(priorityLabels)}
             />
           </div>
           <div className="field">

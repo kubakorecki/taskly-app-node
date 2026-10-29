@@ -15,7 +15,7 @@ model Todo {
   description String    @default("") @db.VarChar(2000)
   priority    String    @default("medium") @db.VarChar(6)
   due_date    DateTime? @db.Date
-  completed   Boolean   @default(false)
+  status      String    @default("open") @db.VarChar(5)
   created_at  DateTime  @db.Timestamptz(6)
   updated_at  DateTime  @db.Timestamptz(6)
 

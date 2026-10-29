@@ -11,37 +11,39 @@ import { useTodoFilters } from './hooks/useTodoFilters'
 import { useTodosBusy } from './hooks/useTodosBusy'
 import { useTodosQuery } from './hooks/useTodosQuery'
 import { useUpdateTodoMutation } from './hooks/useUpdateTodoMutation'
-import type { Todo } from './types'
+import type { Status, Todo } from './types'
+
+const statusNotices: Record<Status, string> = {
+  open: 'Task marked as open.',
+  doing: 'Task marked as doing.',
+  done: 'Task marked as done. Well done!',
+}
 
 export function TodosPage() {
   const todosQuery = useTodosQuery()
   const todos = todosQuery.data ?? []
   const filters = useTodoFilters(todos)
-  const toggleTodo = useUpdateTodoMutation()
+  const updateStatus = useUpdateTodoMutation()
   const busy = useTodosBusy()
   const { message, notify } = useNotice()
   const [editor, setEditor] = useState<Todo | 'new' | null>(null)
   const [deleting, setDeleting] = useState<Todo | null>(null)
-  const error = toggleTodo.error ?? todosQuery.error
+  const error = updateStatus.error ?? todosQuery.error
 
-  async function toggle(todo: Todo) {
+  async function changeStatus(todo: Todo, status: Status) {
     if (busy) return
     try {
-      const saved = await toggleTodo.mutateAsync({
+      const saved = await updateStatus.mutateAsync({
         id: todo.id,
-        input: { completed: !todo.completed },
+        input: { status },
       })
-      notify(
-        saved.completed
-          ? 'Another task complete. Well done!'
-          : 'Task marked as active.',
-      )
+      notify(statusNotices[saved.status])
     } catch {
       // Display the mutation error in the page alert.
     }
   }
   async function retry() {
-    toggleTodo.reset()
+    updateStatus.reset()
     await todosQuery.refetch()
   }
 
@@ -79,7 +81,7 @@ export function TodosPage() {
           failed={todosQuery.isError}
           busy={busy}
           onCreate={() => setEditor('new')}
-          onToggle={(todo) => void toggle(todo)}
+          onStatusChange={(todo, status) => void changeStatus(todo, status)}
           onEdit={setEditor}
           onDelete={setDeleting}
         />

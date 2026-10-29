@@ -5,7 +5,7 @@ const fields = {
   description: z.string().trim().max(2000),
   priority: z.enum(['low', 'medium', 'high']),
   due_date: z.iso.date().nullable(),
-  completed: z.boolean(),
+  status: z.enum(['open', 'doing', 'done']),
 };
 
 export const createSchema = z.strictObject({
@@ -13,7 +13,7 @@ export const createSchema = z.strictObject({
   description: fields.description.default(''),
   priority: fields.priority.default('medium'),
   due_date: fields.due_date.default(null),
-  completed: fields.completed.default(false),
+  status: fields.status.default('open'),
 });
 export const updateSchema = z.strictObject(fields).partial().refine(
   (value) => Object.keys(value).length > 0,

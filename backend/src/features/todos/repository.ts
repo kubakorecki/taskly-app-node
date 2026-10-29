@@ -28,7 +28,7 @@ export class TodoRepository implements TodoStore {
   }
 
   async update(id: number, payload: TodoUpdate): Promise<Todo | null> {
-    const allowed = ['title', 'description', 'priority', 'due_date', 'completed'];
+    const allowed = ['title', 'description', 'priority', 'due_date', 'status'];
     const entries = Object.entries(payload);
     if (!entries.length || entries.some(([key]) => !allowed.includes(key))) {
       throw new Error('Invalid update fields.');
