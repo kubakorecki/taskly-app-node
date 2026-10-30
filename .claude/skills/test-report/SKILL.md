@@ -79,6 +79,6 @@ type TestAgentReport = {
 - All paths are relative to the repo root (`backend/tests/router.test.ts`).
 - Every field is present. Arrays with nothing to report are `[]`.
 - Text fields are plain text. The workflow escapes them and shows `code`, `output`, `before` and `after` in code blocks.
-- Coverage here is what the agent observed. The publish job's own run is the verified result.
+- Coverage here is what the agent observed. The verify job's own run is the verified result.
 
 Done when the file parses as JSON, `decisions` meets the completion criterion of `analyze-pr-changes`, and every test case the agent added, edited or took out appears in `tests`, `editedAssertions`, `suspectedBugs` or `flaky`.
