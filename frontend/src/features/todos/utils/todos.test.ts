@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { formatDate, isOverdue, selectTodos, validateTodo } from './todos'
+import {
+  formatDate,
+  isDueSoon,
+  isOverdue,
+  selectTodos,
+  validateTodo,
+} from './todos'
 import type { Todo, TodoInput } from '../types'
 
 const base: Todo = {
@@ -138,6 +144,31 @@ describe('isOverdue', () => {
       isOverdue({ ...base, due_date: '2026-10-28', completed: true }),
     ).toBe(false)
     expect(isOverdue(base)).toBe(false)
+  })
+})
+
+describe('isDueSoon', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('flags tasks due from the local today through the next 2 days', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 9, 29, 0, 30))
+    expect(isDueSoon({ ...base, due_date: '2026-10-29' })).toBe(true)
+    expect(isDueSoon({ ...base, due_date: '2026-10-31' })).toBe(true)
+    expect(isDueSoon({ ...base, due_date: '2026-11-01' })).toBe(false)
+    expect(isDueSoon({ ...base, due_date: '2026-10-28' })).toBe(false)
+    expect(isDueSoon(base)).toBe(false)
+  })
+
+  it('carries the 2-day window over month and year ends', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 9, 30, 23, 30))
+    expect(isDueSoon({ ...base, due_date: '2026-11-01' })).toBe(true)
+    expect(isDueSoon({ ...base, due_date: '2026-11-02' })).toBe(false)
+    vi.setSystemTime(new Date(2026, 11, 31, 0, 5))
+    expect(isDueSoon({ ...base, due_date: '2027-01-02' })).toBe(true)
+    expect(isDueSoon({ ...base, due_date: '2027-01-03' })).toBe(false)
+    expect(isDueSoon({ ...base, due_date: '2026-12-30' })).toBe(false)
   })
 })
 
