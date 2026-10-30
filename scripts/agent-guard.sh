@@ -5,7 +5,8 @@
 #
 #   Read, Glob, Grep  inside the repo, except .env files
 #   Edit, Write       test and fixture files (not the Vitest setup file), plus test-agent-report.json
-#   Bash              scripts/agent-vitest.sh or scripts/agent-prettier.sh with plain arguments
+#   Bash              scripts/agent-vitest.sh or scripts/agent-prettier.sh with plain arguments,
+#                     or scripts/agent-tsc.sh backend|frontend
 #
 # Any other tool is blocked. Only an explicit allow exits 0, so bad input or a missing jq fails closed.
 
@@ -80,9 +81,9 @@ case $tool in
     writable "$(field file_path)" && exit 0
     block "$tool is limited to test files (backend/tests/**, frontend/src/**/*.test.ts(x), frontend/src/test/** except setup.ts) and test-agent-report.json" ;;
   Bash)
-    command_pattern='^(\./)?scripts/agent-(vitest|prettier)\.sh( [A-Za-z0-9._/=:,@+-]+)*$'
+    command_pattern='^(\./)?scripts/(agent-(vitest|prettier)\.sh( [A-Za-z0-9._/=:,@+-]+)*|agent-tsc\.sh (backend|frontend))$'
     [[ $(field command) =~ $command_pattern ]] && exit 0
-    block 'Bash runs only scripts/agent-vitest.sh or scripts/agent-prettier.sh, with plain space-separated arguments' ;;
+    block 'Bash runs only scripts/agent-vitest.sh or scripts/agent-prettier.sh with plain space-separated arguments, or scripts/agent-tsc.sh backend|frontend' ;;
   *)
     block "$tool is not on the test agent's tool list" ;;
 esac

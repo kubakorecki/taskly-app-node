@@ -23,7 +23,7 @@ type TestAgentReport = {
   version: 1
   mode: 'pr' | 'backfill' // copied from the manifest
   finished: boolean
-  summary: string // one or two plain sentences: what was tested, what was found
+  summary: string // one or two plain sentences: what was tested, what was found, and any source file left with a type error
   decisions: Array<{
     sourceFile: string // path from the manifest
     decision: 'create' | 'update' | 'skip'

@@ -1,6 +1,6 @@
 ---
 name: verify-tests
-description: Runs targeted Vitest runs with coverage through the clean-env wrapper, and iterates until the tests are green and the changed files are at 100%. Handles flaky tests and Suspected bugs. Use after writing or updating unit tests.
+description: Runs targeted Vitest runs with coverage and the typecheck through the clean-env wrappers, and iterates until the tests are green, the packages typecheck and the changed files are at 100%. Handles flaky tests and Suspected bugs. Use after writing or updating unit tests.
 ---
 
 # Verify tests
@@ -30,7 +30,19 @@ The targets are the files with a create or update decision. For each package:
 
 Coverage is closed with tests alone. Source files, the coverage config and `v8 ignore` comments stay untouched.
 
-Vitest strips types without checking them, and the agent can't run `tsc`. The publish job typechecks and fails on a type error, so type mocks the way the convention skills show (`vi.mocked`, `as unknown as ReturnType<…>`).
+## Typecheck
+
+Vitest strips types without checking them, and the verify job fails on a type error anywhere in the package. Once the targets are green at 100%, typecheck each package you touched:
+
+```sh
+scripts/agent-tsc.sh backend
+```
+
+It takes the package and nothing else. Exit 0 means clean. Any other exit lists errors as `file(line,col): error TS…`, unless the message starts with `agent-tsc:`, which means the argument was rejected.
+
+The whole package must be clean, so fix every error in a test file, including test files outside your targets that a PR change broke (a fixture that no longer matches a changed type). A fix keeps each assertion's matcher and expected values. Every file it changes goes in the report's `tests`, with the changed test cases under `updated`. Type mocks the way the convention skills show (`vi.mocked`, `as unknown as ReturnType<…>`). Re-run the typecheck and the test files you changed until both are clean.
+
+An error in a source file is the PR's to fix: leave the source as it is, and name the file in the report's `summary`. The verify job's typecheck output carries the full error.
 
 ## Triage a red test
 
@@ -60,4 +72,4 @@ scripts/agent-vitest.sh backend --coverage --coverage.reporter=text --coverage.r
 
 This catches tests broken by an edited shared fixture, and its summary is the agent-observed coverage for the report. Triage any red test as above.
 
-Done when every target is green at 100% or has a recorded gap, every new test has passed twice, every Suspected bug and assertion edit is in the report, and the full suites have run.
+Done when every target is green at 100% or has a recorded gap, every new test has passed twice, every touched package typechecks clean apart from source files named in `summary`, every Suspected bug and assertion edit is in the report, and the full suites have run.

@@ -73,6 +73,7 @@ it.each([
   'scripts/agent-vitest.sh backend tests/router.test.ts --coverage --coverage.include=src/features/todos/router.ts --coverage.reporter=text --coverage.reporter=json-summary --no-color',
   './scripts/agent-vitest.sh frontend', 'scripts/agent-vitest.sh backend tests/router.test.ts --sequence.shuffle',
   'scripts/agent-prettier.sh frontend/src/features/todos/components/TodoItem.test.tsx frontend/src/test/todoFixture.ts',
+  'scripts/agent-tsc.sh backend', './scripts/agent-tsc.sh frontend',
 ])('lets the agent run %s', (command) => {
   expect(call('Bash', { command }).status).toBe(0);
 });
@@ -85,6 +86,9 @@ it.each([
   'scripts/agent-vitest.sh backend && id', 'scripts/agent-vitest.sh backend | tee x', 'scripts/agent-vitest.sh backend $(id)',
   'scripts/agent-vitest.sh backend `id`', 'scripts/agent-vitest.sh backend\nid', 'scripts/agent-vitest.sh backend > out',
   "scripts/agent-vitest.sh backend 'x'", 'scripts/agent-vitest.sh backend &',
+  'scripts/agent-tsc.sh', 'scripts/agent-tsc.sh scripts', 'scripts/agent-tsc.sh backend2', 'scripts/agent-tsc.sh ../backend',
+  'scripts/agent-tsc.sh backend frontend', 'scripts/agent-tsc.sh backend --noEmit', 'scripts/agent-tsc.sh frontend -p /tmp/x.json',
+  'scripts/agent-tsc.sh backend; id', 'npx tsc --noEmit', 'cd backend && npx tsc',
 ])('blocks running %j', (command) => {
   const { status, stderr } = call('Bash', { command });
   expect(stderr).toContain('agent-guard:');

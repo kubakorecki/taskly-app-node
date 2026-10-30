@@ -171,6 +171,7 @@ jobs:
             --agent unit-test-agent ${MODEL:+--model "$MODEL"} --max-turns 40 \
             --settings "$RUNNER_TEMP/agent-settings.json" --permission-mode dontAsk \
             --allowedTools Read Glob Grep Edit Write 'Bash(scripts/agent-vitest.sh:*)' 'Bash(scripts/agent-prettier.sh:*)' \
+              'Bash(scripts/agent-tsc.sh:*)' \
             --strict-mcp-config --no-session-persistence \
             --output-format stream-json --verbose --include-hook-events \
             > "$OUT/transcript.jsonl"
