@@ -38,6 +38,9 @@ A task that is not Done, meaning it is Open or Doing.
 **Overdue**:
 An active task whose due date is before today in the user's local calendar.
 
+**Due soon**:
+An active task whose due date is today or within the next 2 days in the user's local calendar.
+
 ## Test agent
 
 **Test agent**:
