@@ -24,13 +24,13 @@ function setup() {
 it('replaces the saved task in place in the cached list', async () => {
   const { client, wrapper } = setup()
   const other: Todo = { ...todoFixture, id: 3 }
-  const saved: Todo = { ...todoFixture, completed: true }
+  const saved: Todo = { ...todoFixture, status: 'done' }
   client.setQueryData<Todo[]>(todoKeys.list, [other, todoFixture])
   vi.mocked(todosApi.update).mockResolvedValue(saved)
   const { result } = renderHook(() => useUpdateTodoMutation(), { wrapper })
-  result.current.mutate({ id: 7, input: { completed: true } })
+  result.current.mutate({ id: 7, input: { status: 'done' } })
   await waitFor(() => expect(result.current.isSuccess).toBe(true))
-  expect(todosApi.update).toHaveBeenCalledWith(7, { completed: true })
+  expect(todosApi.update).toHaveBeenCalledWith(7, { status: 'done' })
   expect(client.getQueryData(todoKeys.list)).toEqual([other, saved])
 })
 
@@ -48,7 +48,7 @@ it('exposes the server error and leaves the cache unchanged', async () => {
   client.setQueryData<Todo[]>(todoKeys.list, [todoFixture])
   vi.mocked(todosApi.update).mockRejectedValue(new Error('Task not found.'))
   const { result } = renderHook(() => useUpdateTodoMutation(), { wrapper })
-  result.current.mutate({ id: 7, input: { completed: true } })
+  result.current.mutate({ id: 7, input: { status: 'done' } })
   await waitFor(() => expect(result.current.isError).toBe(true))
   expect(result.current.error).toEqual(new Error('Task not found.'))
   expect(client.getQueryData(todoKeys.list)).toEqual([todoFixture])

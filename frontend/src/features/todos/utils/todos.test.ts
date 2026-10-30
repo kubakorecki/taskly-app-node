@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { formatDate, isOverdue, selectTodos, validateTodo } from './todos'
+import {
+  formatDate,
+  isActive,
+  isOverdue,
+  priorityLabels,
+  selectTodos,
+  statusLabels,
+  toOptions,
+  validateTodo,
+} from './todos'
 import type { Todo, TodoInput } from '../types'
 
 const base: Todo = {
@@ -7,7 +16,7 @@ const base: Todo = {
   title: 'Sprint plan',
   description: '',
   priority: 'medium',
-  completed: false,
+  status: 'open',
   due_date: null,
   created_at: '2026-10-01T12:00:00Z',
   updated_at: '2026-10-01T12:00:00Z',
@@ -18,7 +27,7 @@ describe('selectTodos', () => {
     const matching = { ...base, description: 'Discuss the API' }
     const todos = [
       matching,
-      { ...matching, id: 2, completed: true },
+      { ...matching, id: 2, status: 'done' as const },
       { ...base, id: 3 },
     ]
     expect(selectTodos(todos, 'active', ' api ', 'newest')).toEqual([matching])
@@ -32,8 +41,8 @@ describe('selectTodos', () => {
   })
 
   it('keeps only done tasks for the completed filter', () => {
-    const done = { ...base, id: 2, completed: true }
-    expect(selectTodos([base, done], 'completed', '', 'newest')).toEqual([done])
+    const done = { ...base, id: 2, status: 'done' as const }
+    expect(selectTodos([base, done], 'done', '', 'newest')).toEqual([done])
   })
 
   it('searches the title', () => {
@@ -69,6 +78,71 @@ describe('selectTodos', () => {
       base,
     ])
   })
+
+  describe('status filters', () => {
+    const open = base
+    const doing: Todo = { ...base, id: 2, status: 'doing' }
+    const done: Todo = { ...base, id: 3, status: 'done' }
+    const todos = [open, doing, done]
+
+    it('keeps open and doing tasks for the active filter', () => {
+      expect(selectTodos(todos, 'active', '', 'newest')).toEqual([doing, open])
+    })
+
+    it.each([
+      ['open', [open]],
+      ['doing', [doing]],
+      ['done', [done]],
+    ] as const)(
+      'keeps only %s tasks for their own filter',
+      (filter, expected) => {
+        expect(selectTodos(todos, filter, '', 'newest')).toEqual(expected)
+      },
+    )
+
+    it('keeps every status for the all filter', () => {
+      expect(selectTodos(todos, 'all', '', 'newest')).toEqual([
+        done,
+        doing,
+        open,
+      ])
+    })
+  })
+})
+
+describe('isActive', () => {
+  it.each([
+    ['open', true],
+    ['doing', true],
+    ['done', false],
+  ] as const)('treats a %s task as active: %s', (status, expected) => {
+    expect(isActive({ ...base, status })).toBe(expected)
+  })
+})
+
+describe('statusLabels and toOptions', () => {
+  it('labels every status', () => {
+    expect(statusLabels).toEqual({ open: 'Open', doing: 'Doing', done: 'Done' })
+  })
+
+  it('turns labels into select options in their order', () => {
+    expect(toOptions(statusLabels)).toEqual([
+      { value: 'open', label: 'Open' },
+      { value: 'doing', label: 'Doing' },
+      { value: 'done', label: 'Done' },
+    ])
+    expect(toOptions(priorityLabels)).toEqual([
+      { value: 'low', label: 'Low' },
+      { value: 'medium', label: 'Medium' },
+      { value: 'high', label: 'High' },
+    ])
+    expect(toOptions({})).toEqual([])
+  })
+
+  it('keeps HTML in labels as plain strings', () => {
+    const html = '<img src=x onerror=alert(1)>'
+    expect(toOptions({ x: html })).toEqual([{ value: 'x', label: html }])
+  })
 })
 
 describe('validateTodo', () => {
@@ -77,7 +151,7 @@ describe('validateTodo', () => {
     description: '',
     priority: 'medium',
     due_date: null,
-    completed: false,
+    status: 'open',
   }
 
   it('accepts a valid task', () => {
@@ -134,10 +208,18 @@ describe('isOverdue', () => {
     vi.setSystemTime(new Date(2026, 9, 29, 0, 30))
     expect(isOverdue({ ...base, due_date: '2026-10-28' })).toBe(true)
     expect(isOverdue({ ...base, due_date: '2026-10-29' })).toBe(false)
-    expect(
-      isOverdue({ ...base, due_date: '2026-10-28', completed: true }),
-    ).toBe(false)
+    expect(isOverdue({ ...base, due_date: '2026-10-28', status: 'done' })).toBe(
+      false,
+    )
     expect(isOverdue(base)).toBe(false)
+  })
+
+  it('flags a doing task due before the local today', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 9, 29, 0, 30))
+    expect(
+      isOverdue({ ...base, status: 'doing', due_date: '2026-10-28' }),
+    ).toBe(true)
   })
 })
 
