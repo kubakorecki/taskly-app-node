@@ -78,7 +78,7 @@ The workflow is `.github/workflows/test-agent.yml`. Its scripts are in `scripts/
 
 The guard, the wrappers and these scripts have tests in `scripts/tests/`, which the agent can't write, so it can't weaken the tests of its own guardrails. `.github/workflows/ci.yml` runs both packages' typecheck and coverage, and these script tests (`test-agent-scripts`), on every PR and on `main`.
 
-## Example run: the Doing status feature (#9)
+## Example run: the Doing status feature with no tests (#9)
 
 [PR #9](https://github.com/kubakorecki/taskly-app-node/pull/9) replaces a task's `completed` flag with a Status of Open, Doing or Done, across the Prisma model, validators, mapper, OpenAPI, frontend types, utils, components and filters. It was opened **without tests** (`7ea2c06`), so the existing tests were stale and the new code was uncovered: 17 backend and 19 frontend tests failed before the agent's commit.
 
@@ -107,6 +107,26 @@ The guard, the wrappers and these scripts have tests in `scripts/tests/`, which 
 
 - **Commit:** [`74b345c`](https://github.com/kubakorecki/taskly-app-node/commit/74b345cacd3abe6a4e20f155c710263f99558459) "Add unit tests from the test agent", by `taskly-app-node-test-agent[bot]` with the `[test-agent]` trailer. It touches 16 files, +530/−95.
 - **After the commit:** `ci` ran on the bot's commit (`backend`, `frontend` and `test-agent-scripts` pass), the `test-agent` check passed, and #9 is mergeable. It's left open for review.
+
+## Example run: a fully tested feature (#11)
+
+[PR #11](https://github.com/kubakorecki/taskly-app-node/pull/11) adds a "Clear done tasks" button: `DELETE /api/todos/done` returns `{ deleted: n }`, and a new `useClearDoneMutation` hook drops Done tasks from the cached list. Unlike #9, it was opened **with full tests**, so every changed source file was already at 100% on all four metrics. It checks that the agent leaves a well-tested PR alone.
+
+**Run** ([41124004949](https://github.com/kubakorecki/taskly-app-node/actions/runs/41124004949), [transcript](https://github.com/kubakorecki/taskly-app-node/actions/runs/41124004949/artifacts/13009966990), [comment](https://github.com/kubakorecki/taskly-app-node/pull/11#issuecomment-6532941840)): ✅ "No test changes, all checks passed".
+
+- **Timing:** `generate` 2m13s, `verify` 1m17s, `publish` 12s.
+- **Decisions:** **skip** for all 8 files. Six are "already covered" (rubric rule 4), and each reason names the assertions it found, for example "router.test.ts asserts DELETE /done (200 with counts 3 and 0, extra body ignored), done rejected as an ID on GET/PATCH, and error propagation". The other two are `types.ts` (types-only) and `queryKeys.ts` (excluded by `coverage.exclude`).
+- **Result:** no patch and no commit. The workflow's own run has 245 tests before and after, both typechecks and `format:check` pass, and every changed file stays at 100%.
+
+## Example run: a planted bug (#12)
+
+[PR #12](https://github.com/kubakorecki/taskly-app-node/pull/12) is a probe. It adds a "· due soon" mark for tasks due today or within the next 2 days, **with** tests, and on purpose includes a bug those tests miss: `isDueSoon` has no `!todo.completed` check, so a Done task can be marked due soon. The PR's tests cover only active tasks, and both changed files are already at 100% coverage, so coverage gives no hint. The agent can only find the bug through the checklist and the spec: `CONTEXT.md` defines Due soon as an *active* task, and the sibling `isOverdue` does check `completed`. The PR description doesn't mention the bug.
+
+**Run** ([41124890432](https://github.com/kubakorecki/taskly-app-node/actions/runs/41124890432), [comment](https://github.com/kubakorecki/taskly-app-node/pull/12#issuecomment-6533053513)): ❌ "2 Suspected bugs", which is the expected verdict.
+
+- **Timing:** `generate` 2m16s, `verify` 54s, `publish` 15s.
+- **Caught:** the agent wrote a test for a Done task due soon in `todos.test.ts` and another in `TodoItem.test.tsx`. Both failed, and it reported both as Suspected bugs with the same root cause, citing `CONTEXT.md` and `isOverdue`. As designed, it didn't commit either failing test.
+- **Also added:** a task due in 3 days stays neutral, and the 2-day window rolls over month and year ends. This is commit [`383df1c`](https://github.com/kubakorecki/taskly-app-node/commit/383df1cef5eb4fccd9c26a7c06635c1b5f475f02), and the test count went from 228 to 230.
 
 ## Assumptions
 
