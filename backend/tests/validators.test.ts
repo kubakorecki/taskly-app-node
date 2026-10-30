@@ -5,14 +5,14 @@ import { todo } from './fixture.ts';
 describe('todo validation', () => {
   it('trims text and supplies create defaults', () => {
     expect(createSchema.parse({ title: '  Task  ' })).toEqual({
-      title: 'Task', description: '', priority: 'medium', due_date: null, completed: false,
+      title: 'Task', description: '', priority: 'medium', due_date: null, status: 'open',
     });
   });
   it('accepts every input field and boundary lengths', () => {
-    const input = { title: 'x'.repeat(120), description: 'x'.repeat(2000), priority: 'low', due_date: '2024-02-29', completed: true };
+    const input = { title: 'x'.repeat(120), description: 'x'.repeat(2000), priority: 'low', due_date: '2024-02-29', status: 'done' };
     expect(createSchema.parse(input)).toEqual(input);
-    expect(updateSchema.parse({ description: '  Details  ', title: '  Task  ', priority: 'high', completed: false, due_date: null }))
-      .toEqual({ description: 'Details', title: 'Task', priority: 'high', completed: false, due_date: null });
+    expect(updateSchema.parse({ description: '  Details  ', title: '  Task  ', priority: 'high', status: 'doing', due_date: null }))
+      .toEqual({ description: 'Details', title: 'Task', priority: 'high', status: 'doing', due_date: null });
     expect(updateSchema.parse({ due_date: '2026-10-15' })).toEqual({ due_date: '2026-10-15' });
   });
   it.each([
@@ -36,5 +36,28 @@ describe('todo validation', () => {
     expect(idSchema.parse('12')).toBe(12);
     expect(todoSchema.parse(todo)).toEqual(todo);
     expect(todoSchema.safeParse({ ...todo, created_at: 'yesterday' }).success).toBe(false);
+  });
+  it.each(['open', 'doing', 'done'])('accepts the status %s on create and update', (status) => {
+    expect(createSchema.parse({ title: 'Task', status }).status).toBe(status);
+    expect(updateSchema.parse({ status })).toEqual({ status });
+    expect(todoSchema.parse({ ...todo, status }).status).toBe(status);
+  });
+  it.each(['archived', 'Done', ' done ', '', null, true, 1])('rejects the status %j', (status) => {
+    expect(createSchema.safeParse({ title: 'Task', status }).success).toBe(false);
+    expect(updateSchema.safeParse({ status }).success).toBe(false);
+    expect(todoSchema.safeParse({ ...todo, status }).success).toBe(false);
+  });
+  it('rejects the legacy completed field in patches and responses', () => {
+    expect(updateSchema.safeParse({ completed: true }).success).toBe(false);
+    expect(todoSchema.safeParse({ ...todo, completed: true }).success).toBe(false);
+  });
+  it.each(['{"title":"Task","__proto__":{"admin":true}}', '{"title":"Task","constructor":{"prototype":{"admin":true}}}', '{"title":"Task","prototype":{"admin":true}}'])(
+    'rejects prototype keys in create and update input: %s', (body) => {
+      expect(createSchema.safeParse(JSON.parse(body)).success).toBe(false);
+      expect(updateSchema.safeParse(JSON.parse(body)).success).toBe(false);
+    },
+  );
+  it('keeps HTML in text verbatim', () => {
+    expect(createSchema.parse({ title: '<script>alert(1)</script>', description: '<b>bold</b>' })).toMatchObject({ title: '<script>alert(1)</script>', description: '<b>bold</b>' });
   });
 });

@@ -1,5 +1,6 @@
 import { Input, Select } from '../../../design-system'
 import type { Filter, Sort } from '../types'
+import { statusLabels, toOptions } from '../utils/todos'
 
 interface TodoFiltersProps {
   filter: Filter
@@ -31,9 +32,9 @@ export function TodoFilters({
         value={filter}
         onChange={(event) => onFilterChange(event.target.value as Filter)}
         options={[
-          { value: 'all', label: 'All statuses' },
-          { value: 'active', label: 'To do' },
-          { value: 'completed', label: 'Completed' },
+          { value: 'all', label: 'All' },
+          { value: 'active', label: 'Active' },
+          ...toOptions(statusLabels),
         ]}
       />
       <Select

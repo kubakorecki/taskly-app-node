@@ -1,25 +1,38 @@
 import { CalendarDays, Pencil, Trash2 } from 'lucide-react'
-import type { Todo } from '../types'
-import { formatDate, isOverdue, priorityLabels } from '../utils/todos'
+import type { Status, Todo } from '../types'
+import {
+  formatDate,
+  isOverdue,
+  priorityLabels,
+  statusLabels,
+  toOptions,
+} from '../utils/todos'
 import {
   Badge,
+  type BadgeVariant,
   Card,
-  Checkbox,
   Heading,
   IconButton,
+  Select,
   Text,
 } from '../../../design-system'
+
+const statusVariants: Record<Status, BadgeVariant> = {
+  open: 'neutral',
+  doing: 'info',
+  done: 'success',
+}
 
 export function TodoItem({
   todo,
   busy,
-  onToggle,
+  onStatusChange,
   onEdit,
   onDelete,
 }: {
   todo: Todo
   busy: boolean
-  onToggle: () => void
+  onStatusChange: (status: Status) => void
   onEdit: () => void
   onDelete: () => void
 }) {
@@ -38,8 +51,8 @@ export function TodoItem({
               <Text as="span" muted size="small">
                 #{todo.id}
               </Text>
-              <Badge variant={todo.completed ? 'success' : 'info'}>
-                {todo.completed ? 'Completed' : 'To do'}
+              <Badge variant={statusVariants[todo.status]}>
+                {statusLabels[todo.status]}
               </Badge>
               <Text as="span" muted size="small">
                 {priorityLabels[todo.priority]}
@@ -56,12 +69,12 @@ export function TodoItem({
             </div>
           </div>
           <div className="row compact todo-actions">
-            <Checkbox
-              label=""
-              checked={todo.completed}
+            <Select
+              value={todo.status}
               disabled={busy}
-              onChange={onToggle}
-              aria-label={`${todo.completed ? 'Mark as active' : 'Complete'}: ${todo.title}`}
+              onChange={(event) => onStatusChange(event.target.value as Status)}
+              aria-label={`Status: ${todo.title}`}
+              options={toOptions(statusLabels)}
             />
             <IconButton
               variant="ghost"

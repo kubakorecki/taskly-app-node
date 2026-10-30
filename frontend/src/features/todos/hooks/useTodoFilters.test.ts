@@ -9,7 +9,7 @@ const done: Todo = {
   id: 8,
   title: 'Ship release',
   priority: 'high',
-  completed: true,
+  status: 'done',
 }
 const todos = [todoFixture, done]
 

@@ -1,5 +1,5 @@
 import { Card, Heading, Text } from '../../../design-system'
-import type { Todo } from '../types'
+import type { Status, Todo } from '../types'
 import { TodoEmptyState } from './TodoEmptyState'
 import { TodoItem } from './TodoItem'
 
@@ -10,7 +10,7 @@ interface TodoListProps {
   failed: boolean
   busy: boolean
   onCreate: () => void
-  onToggle: (todo: Todo) => void
+  onStatusChange: (todo: Todo, status: Status) => void
   onEdit: (todo: Todo) => void
   onDelete: (todo: Todo) => void
 }
@@ -22,7 +22,7 @@ export function TodoList({
   failed,
   busy,
   onCreate,
-  onToggle,
+  onStatusChange,
   onEdit,
   onDelete,
 }: TodoListProps) {
@@ -44,7 +44,7 @@ export function TodoList({
               key={todo.id}
               todo={todo}
               busy={busy}
-              onToggle={() => onToggle(todo)}
+              onStatusChange={(status) => onStatusChange(todo, status)}
               onEdit={() => onEdit(todo)}
               onDelete={() => onDelete(todo)}
             />

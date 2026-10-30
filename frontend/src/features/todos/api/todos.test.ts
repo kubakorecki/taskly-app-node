@@ -23,7 +23,7 @@ it('sends only writable task fields on creation', async () => {
       description: '',
       priority: 'medium',
       due_date: null,
-      completed: false,
+      status: 'open',
     }),
   })
 })
@@ -31,7 +31,7 @@ it('sends only writable task fields on creation', async () => {
 it('drops unknown and read-only fields on creation', async () => {
   vi.mocked(request).mockResolvedValue(todoFixture)
   const input = JSON.parse(
-    '{"title":"Plan","description":"Notes","priority":"high","due_date":"2026-11-01","completed":true,"id":99,"owner":"admin","__proto__":{"admin":true}}',
+    '{"title":"Plan","description":"Notes","priority":"high","due_date":"2026-11-01","status":"done","completed":true,"id":99,"owner":"admin","__proto__":{"admin":true}}',
   )
   await todosApi.create(input)
   expect(request).toHaveBeenCalledWith('/todos', {
@@ -41,7 +41,7 @@ it('drops unknown and read-only fields on creation', async () => {
       description: 'Notes',
       priority: 'high',
       due_date: '2026-11-01',
-      completed: true,
+      status: 'done',
     }),
   })
 })
@@ -49,7 +49,7 @@ it('drops unknown and read-only fields on creation', async () => {
 it('patches only writable fields at the task path', async () => {
   vi.mocked(request).mockResolvedValue(todoFixture)
   await expect(
-    todosApi.update(7, { ...todoFixture, completed: true }),
+    todosApi.update(7, { ...todoFixture, status: 'done' }),
   ).resolves.toEqual(todoFixture)
   expect(request).toHaveBeenCalledWith('/todos/7', {
     method: 'PATCH',
@@ -58,17 +58,17 @@ it('patches only writable fields at the task path', async () => {
       description: '',
       priority: 'medium',
       due_date: null,
-      completed: true,
+      status: 'done',
     }),
   })
 })
 
 it('sends only the fields given in a partial update', async () => {
   vi.mocked(request).mockResolvedValue(todoFixture)
-  await todosApi.update(Number.MAX_SAFE_INTEGER, { completed: true })
+  await todosApi.update(Number.MAX_SAFE_INTEGER, { status: 'done' })
   expect(request).toHaveBeenCalledWith(`/todos/${Number.MAX_SAFE_INTEGER}`, {
     method: 'PATCH',
-    body: '{"completed":true}',
+    body: '{"status":"done"}',
   })
 })
 
@@ -82,4 +82,27 @@ it('surfaces a server rejection of an ID', async () => {
   vi.mocked(request).mockRejectedValue(new Error('Task not found.'))
   await expect(todosApi.remove(-1)).rejects.toThrow('Task not found.')
   expect(request).toHaveBeenCalledWith('/todos/-1', { method: 'DELETE' })
+})
+
+it('drops the legacy completed field and prototype keys from a status update', async () => {
+  vi.mocked(request).mockResolvedValue(todoFixture)
+  await todosApi.update(
+    7,
+    JSON.parse(
+      '{"status":"doing","completed":true,"id":1,"__proto__":{"admin":true}}',
+    ),
+  )
+  expect(request).toHaveBeenCalledWith('/todos/7', {
+    method: 'PATCH',
+    body: '{"status":"doing"}',
+  })
+})
+
+it('surfaces a server rejection of a status update', async () => {
+  vi.mocked(request).mockRejectedValue(
+    new Error('Please check the highlighted fields.'),
+  )
+  await expect(todosApi.update(7, { status: 'doing' })).rejects.toThrow(
+    'Please check the highlighted fields.',
+  )
 })

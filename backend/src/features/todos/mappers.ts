@@ -8,7 +8,7 @@ export function fromModel(record: TodoRecord): Todo {
     description: record.description,
     priority: record.priority,
     due_date: record.due_date?.toISOString().slice(0, 10) ?? null,
-    completed: record.completed,
+    status: record.status,
     created_at: record.created_at.toISOString(),
     updated_at: record.updated_at.toISOString(),
   });

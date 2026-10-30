@@ -19,4 +19,11 @@ export async function initialize(database: Database): Promise<void> {
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
   )`;
+  // Status replaces the legacy completed column. Only rows without a status are backfilled, so a rerun never overwrites it.
+  await database.$transaction([
+    database.$executeRaw`ALTER TABLE todos ADD COLUMN IF NOT EXISTS status VARCHAR(5)
+      CONSTRAINT todo_status CHECK (status IN ('open', 'doing', 'done'))`,
+    database.$executeRaw`UPDATE todos SET status = CASE WHEN completed THEN 'done' ELSE 'open' END WHERE status IS NULL`,
+    database.$executeRaw`ALTER TABLE todos ALTER COLUMN status SET DEFAULT 'open', ALTER COLUMN status SET NOT NULL`,
+  ]);
 }

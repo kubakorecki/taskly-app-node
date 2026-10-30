@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { TodoFilters } from './TodoFilters'
@@ -16,15 +16,71 @@ it('displays controlled values and forwards all filter changes', async () => {
     <TodoFilters filter="all" search="" sort="newest" {...callbacks} />,
   )
   await user.type(screen.getByLabelText('Search tasks'), 'a')
-  await user.selectOptions(screen.getByLabelText('Status'), 'completed')
+  await user.selectOptions(screen.getByLabelText('Status'), 'done')
   await user.selectOptions(screen.getByLabelText('Sort by'), 'due')
   expect(callbacks.onSearchChange).toHaveBeenCalledWith('a')
-  expect(callbacks.onFilterChange).toHaveBeenCalledWith('completed')
+  expect(callbacks.onFilterChange).toHaveBeenCalledWith('done')
   expect(callbacks.onSortChange).toHaveBeenCalledWith('due')
   rerender(
-    <TodoFilters filter="completed" search="demo" sort="due" {...callbacks} />,
+    <TodoFilters filter="done" search="demo" sort="due" {...callbacks} />,
   )
   expect(screen.getByLabelText('Search tasks')).toHaveValue('demo')
-  expect(screen.getByLabelText('Status')).toHaveValue('completed')
+  expect(screen.getByLabelText('Status')).toHaveValue('done')
   expect(screen.getByLabelText('Sort by')).toHaveValue('due')
+})
+
+it('offers all, active and every status as status filters', () => {
+  render(
+    <TodoFilters
+      filter="all"
+      search=""
+      sort="newest"
+      onFilterChange={vi.fn()}
+      onSearchChange={vi.fn()}
+      onSortChange={vi.fn()}
+    />,
+  )
+  const options = within(screen.getByLabelText('Status')).getAllByRole('option')
+  expect(
+    options.map((option) => [option.getAttribute('value'), option.textContent]),
+  ).toEqual([
+    ['all', 'All'],
+    ['active', 'Active'],
+    ['open', 'Open'],
+    ['doing', 'Doing'],
+    ['done', 'Done'],
+  ])
+})
+
+it.each(['active', 'open', 'doing'] as const)(
+  'forwards the %s filter without touching search or sort',
+  async (filter) => {
+    const user = userEvent.setup()
+    const callbacks = {
+      onFilterChange: vi.fn(),
+      onSearchChange: vi.fn(),
+      onSortChange: vi.fn(),
+    }
+    render(<TodoFilters filter="all" search="" sort="newest" {...callbacks} />)
+    await user.selectOptions(screen.getByLabelText('Status'), filter)
+    expect(callbacks.onFilterChange).toHaveBeenCalledExactlyOnceWith(filter)
+    expect(callbacks.onSearchChange).not.toHaveBeenCalled()
+    expect(callbacks.onSortChange).not.toHaveBeenCalled()
+  },
+)
+
+it('shows a search containing HTML as plain text', () => {
+  const html = '<img src=x onerror=alert(1)>'
+  const { container } = render(
+    <TodoFilters
+      filter="all"
+      search={html}
+      sort="newest"
+      onFilterChange={vi.fn()}
+      onSearchChange={vi.fn()}
+      onSortChange={vi.fn()}
+    />,
+  )
+  expect(screen.getByLabelText('Search tasks')).toHaveValue(html)
+  expect(container.querySelector('img')).toBeNull()
 })
