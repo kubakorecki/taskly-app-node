@@ -54,7 +54,7 @@ Read the failure, the test and the source, then pick one case.
   2. Take your change out of the tree. A case you added is deleted, along with its test file if that file was new and is now empty, and any helper or fixture that only it used. A case that already existed goes back to its original text.
   3. Re-run to confirm the rest is green.
 - **An existing test is red because of an Intentional behaviour change** listed by `analyze-pr-changes`: edit only the assertions that encode the old behaviour, so they encode the new one, and keep the rest of the test intact. Record each edit in the report with before, after and the reason.
-- **An existing test is red for any other reason**: the PR broke behaviour the test pins, so it is a Suspected bug with `existing: true`. Leave the test exactly as it was before your run and report it. The publish job's full run then goes red on it, which is the correct outcome.
+- **An existing test is red for any other reason**: the PR broke behaviour the test pins, so it is a Suspected bug with `existing: true`. Leave the test exactly as it was before your run and report it. The verify job's full run then goes red on it, which is the correct outcome.
 
 Red tests you wrote are never kept: the Suspected bug is how the finding reaches the PR. Existing test cases always stay in the tree, unchanged apart from the assertion edits above. Every assertion keeps its strength: the same exact matcher and the same expected values, unless an Intentional behaviour change says otherwise.
 

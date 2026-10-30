@@ -1,5 +1,7 @@
 # Taskly App Node
 
+The unit test agent, its skills and the PR workflow are described in [SOLUTION.md](SOLUTION.md). [TEST-AGENT.md](TEST-AGENT.md) explains step by step how a run works.
+
 ## Setup
 
 ```sh
