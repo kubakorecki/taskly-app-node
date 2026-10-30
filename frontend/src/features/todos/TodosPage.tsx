@@ -7,6 +7,7 @@ import { TodoEditor } from './components/TodoEditor'
 import { TodoFilters } from './components/TodoFilters'
 import { TodoList } from './components/TodoList'
 import { TodosHeader } from './components/TodosHeader'
+import { useClearDoneMutation } from './hooks/useClearDoneMutation'
 import { useTodoFilters } from './hooks/useTodoFilters'
 import { useTodosBusy } from './hooks/useTodosBusy'
 import { useTodosQuery } from './hooks/useTodosQuery'
@@ -18,11 +19,12 @@ export function TodosPage() {
   const todos = todosQuery.data ?? []
   const filters = useTodoFilters(todos)
   const toggleTodo = useUpdateTodoMutation()
+  const clearDoneTasks = useClearDoneMutation()
   const busy = useTodosBusy()
   const { message, notify } = useNotice()
   const [editor, setEditor] = useState<Todo | 'new' | null>(null)
   const [deleting, setDeleting] = useState<Todo | null>(null)
-  const error = toggleTodo.error ?? todosQuery.error
+  const error = toggleTodo.error ?? clearDoneTasks.error ?? todosQuery.error
 
   async function toggle(todo: Todo) {
     if (busy) return
@@ -40,8 +42,22 @@ export function TodosPage() {
       // Display the mutation error in the page alert.
     }
   }
+  async function clearDone() {
+    if (busy) return
+    try {
+      const { deleted } = await clearDoneTasks.mutateAsync()
+      notify(
+        deleted === 1
+          ? '1 done task cleared.'
+          : `${deleted} done tasks cleared.`,
+      )
+    } catch {
+      // Display the mutation error in the page alert.
+    }
+  }
   async function retry() {
     toggleTodo.reset()
+    clearDoneTasks.reset()
     await todosQuery.refetch()
   }
 
@@ -50,7 +66,9 @@ export function TodosPage() {
       <main id="main" className="page-layout">
         <TodosHeader
           disabled={todosQuery.isPending || busy}
+          doneCount={todos.filter((todo) => todo.completed).length}
           onCreate={() => setEditor('new')}
+          onClearDone={() => void clearDone()}
         />
         <TodoFilters
           filter={filters.filter}

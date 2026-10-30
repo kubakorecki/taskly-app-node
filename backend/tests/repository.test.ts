@@ -75,6 +75,14 @@ it('deletes tasks and handles missing tasks', async () => {
   expect(remove).toHaveBeenCalledWith({ where: { id: 1 } });
   expect(await repository.delete(1)).toBe(false);
 });
+it('deletes every done task and returns the count', async () => {
+  const { database, repository } = setup();
+  const remove = vi.spyOn(database.todo, 'deleteMany').mockResolvedValueOnce({ count: 3 }).mockResolvedValueOnce({ count: 0 });
+  expect(await repository.deleteDone()).toBe(3);
+  expect(remove).toHaveBeenCalledWith({ where: { completed: true } });
+  expect(await repository.deleteDone()).toBe(0);
+  expect(remove).toHaveBeenCalledTimes(2);
+});
 
 it('propagates database errors', async () => {
   const { database, repository } = setup();

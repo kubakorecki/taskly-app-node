@@ -9,6 +9,7 @@ import { TodoEditor } from './components/TodoEditor'
 import { TodoFilters } from './components/TodoFilters'
 import { TodoList } from './components/TodoList'
 import { TodosHeader } from './components/TodosHeader'
+import { useClearDoneMutation } from './hooks/useClearDoneMutation'
 import { useTodoFilters } from './hooks/useTodoFilters'
 import { useTodosBusy } from './hooks/useTodosBusy'
 import { useTodosQuery } from './hooks/useTodosQuery'
@@ -23,6 +24,9 @@ vi.mock('./hooks/useTodosBusy', () => ({ useTodosBusy: vi.fn() }))
 vi.mock('./hooks/useTodosQuery', () => ({ useTodosQuery: vi.fn() }))
 vi.mock('./hooks/useUpdateTodoMutation', () => ({
   useUpdateTodoMutation: vi.fn(),
+}))
+vi.mock('./hooks/useClearDoneMutation', () => ({
+  useClearDoneMutation: vi.fn(),
 }))
 vi.mock('./components/TodosHeader', () => ({
   TodosHeader: vi.fn(() => <h1>Tasks</h1>),
@@ -49,11 +53,14 @@ function setup({
   queryError = null as Error | null,
   mutationError = null as Error | null,
   mutateAsync = vi.fn(),
+  clearError = null as Error | null,
+  clearMutateAsync = vi.fn(),
   busy = false,
   message = '',
 } = {}) {
   const refetch = vi.fn().mockResolvedValue(undefined)
   const reset = vi.fn()
+  const clearReset = vi.fn()
   const notify = vi.fn()
   const data = loaded ? todos : undefined
   const filters = {
@@ -78,10 +85,23 @@ function setup({
     reset,
     mutateAsync,
   } as unknown as ReturnType<typeof useUpdateTodoMutation>)
+  vi.mocked(useClearDoneMutation).mockReturnValue({
+    error: clearError,
+    reset: clearReset,
+    mutateAsync: clearMutateAsync,
+  } as unknown as ReturnType<typeof useClearDoneMutation>)
   vi.mocked(useTodosBusy).mockReturnValue(busy)
   vi.mocked(useNotice).mockReturnValue({ message, notify })
   vi.mocked(useTodoFilters).mockReturnValue(filters)
-  return { refetch, reset, notify, filters, mutateAsync }
+  return {
+    refetch,
+    reset,
+    clearReset,
+    notify,
+    filters,
+    mutateAsync,
+    clearMutateAsync,
+  }
 }
 
 const listProps = () => vi.mocked(TodoList).mock.lastCall![0]
@@ -92,6 +112,7 @@ it('displays a query failure and resets mutation errors before retrying', async 
   const user = userEvent.setup()
   const refetch = vi.fn().mockResolvedValue(undefined)
   const reset = vi.fn()
+  const clearReset = vi.fn()
   vi.mocked(useTodosQuery).mockReturnValue({
     data: [],
     isPending: false,
@@ -105,6 +126,11 @@ it('displays a query failure and resets mutation errors before retrying', async 
     reset,
     mutateAsync: vi.fn(),
   } as unknown as ReturnType<typeof useUpdateTodoMutation>)
+  vi.mocked(useClearDoneMutation).mockReturnValue({
+    error: null,
+    reset: clearReset,
+    mutateAsync: vi.fn(),
+  } as unknown as ReturnType<typeof useClearDoneMutation>)
   vi.mocked(useTodosBusy).mockReturnValue(false)
   vi.mocked(useNotice).mockReturnValue({ message: '', notify: vi.fn() })
   vi.mocked(useTodoFilters).mockReturnValue({
@@ -123,7 +149,11 @@ it('displays a query failure and resets mutation errors before retrying', async 
   await user.click(screen.getByRole('button', { name: 'Try again' }))
   await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1))
   expect(reset).toHaveBeenCalledTimes(1)
+  expect(clearReset).toHaveBeenCalledTimes(1)
   expect(reset.mock.invocationCallOrder[0]).toBeLessThan(
+    refetch.mock.invocationCallOrder[0],
+  )
+  expect(clearReset.mock.invocationCallOrder[0]).toBeLessThan(
     refetch.mock.invocationCallOrder[0],
   )
 })
@@ -134,6 +164,7 @@ it('wires the loaded tasks, filters and notice into the page', () => {
   expect(screen.queryByTestId('alert')).not.toBeInTheDocument()
   expect(vi.mocked(useTodoFilters)).toHaveBeenCalledWith([todoFixture])
   expect(vi.mocked(TodosHeader).mock.lastCall![0].disabled).toBe(false)
+  expect(vi.mocked(TodosHeader).mock.lastCall![0].doneCount).toBe(0)
   expect(vi.mocked(TodoFilters).mock.lastCall![0]).toEqual({
     filter: 'active',
     search: 'demo',
@@ -293,4 +324,73 @@ it('closes the delete confirmation when cancelled', () => {
   rerender(<TodosPage />)
   expect(DeleteTodoDialog).not.toHaveBeenCalled()
   expect(notify).not.toHaveBeenCalled()
+})
+
+const headerProps = () => vi.mocked(TodosHeader).mock.lastCall![0]
+
+it('counts only done tasks for the header', () => {
+  const done = { ...todoFixture, id: 8, completed: true }
+  setup({ todos: [todoFixture, done, { ...done, id: 9 }] })
+  render(<TodosPage />)
+  expect(headerProps().doneCount).toBe(2)
+})
+
+it.each([
+  [1, '1 done task cleared.'],
+  [3, '3 done tasks cleared.'],
+  [0, '0 done tasks cleared.'],
+])('clears done tasks and reports %i', async (deleted, notice) => {
+  const { clearMutateAsync, notify } = setup({
+    clearMutateAsync: vi.fn().mockResolvedValue({ deleted }),
+  })
+  render(<TodosPage />)
+  await act(async () => headerProps().onClearDone())
+  expect(clearMutateAsync).toHaveBeenCalledTimes(1)
+  expect(clearMutateAsync).toHaveBeenCalledWith()
+  expect(notify).toHaveBeenCalledWith(notice)
+})
+
+it('ignores clearing done tasks while busy', async () => {
+  const { clearMutateAsync, notify } = setup({ busy: true })
+  render(<TodosPage />)
+  await act(async () => headerProps().onClearDone())
+  expect(clearMutateAsync).not.toHaveBeenCalled()
+  expect(notify).not.toHaveBeenCalled()
+})
+
+it('shows no notice when clearing done tasks fails', async () => {
+  const { clearMutateAsync, notify } = setup({
+    clearMutateAsync: vi
+      .fn()
+      .mockRejectedValue(new Error('The operation failed. Please try again.')),
+  })
+  render(<TodosPage />)
+  await act(async () => headerProps().onClearDone())
+  expect(clearMutateAsync).toHaveBeenCalledTimes(1)
+  expect(notify).not.toHaveBeenCalled()
+})
+
+it('shows a clear failure before the query error and resets it on retry', async () => {
+  const user = userEvent.setup()
+  const { clearReset, reset, refetch } = setup({
+    queryError: new Error('Cannot connect to the server. Please try again.'),
+    clearError: new Error('The operation failed. Please try again.'),
+  })
+  render(<TodosPage />)
+  expect(screen.getByTestId('alert')).toHaveTextContent(
+    'The operation failed. Please try again.',
+  )
+  await user.click(screen.getByRole('button', { name: 'Try again' }))
+  await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1))
+  expect(reset).toHaveBeenCalledTimes(1)
+  expect(clearReset).toHaveBeenCalledTimes(1)
+})
+
+it('shows a toggle failure before a clear failure', () => {
+  setup({
+    mutationError: new Error('Task not found.'),
+    clearError: new Error('The operation failed. Please try again.'),
+  })
+  render(<TodosPage />)
+  expect(screen.getByTestId('alert')).toHaveTextContent('Task not found.')
 })

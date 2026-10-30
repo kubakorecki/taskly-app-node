@@ -5,7 +5,7 @@ import { createTodosRouter } from '../src/features/todos/router.ts';
 import { todo } from './fixture.ts';
 
 function setup() {
-  const repository = { list: vi.fn().mockResolvedValue([todo]), create: vi.fn().mockResolvedValue(todo), get: vi.fn(), update: vi.fn(), delete: vi.fn() };
+  const repository = { list: vi.fn().mockResolvedValue([todo]), create: vi.fn().mockResolvedValue(todo), get: vi.fn(), update: vi.fn(), delete: vi.fn(), deleteDone: vi.fn() };
   const app = express();
   app.use(express.json());
   app.use('/api/todos', createTodosRouter(repository));
@@ -107,6 +107,25 @@ it('deletes a task', async () => {
   expect(response.text).toBe('');
   expect(repository.delete).toHaveBeenCalledWith(1);
 });
+it.each([3, 0])('deletes every done task and reports the count (%i)', async (deleted) => {
+  const { app, repository } = setup();
+  repository.deleteDone.mockResolvedValue(deleted);
+  const response = await request(app).delete('/api/todos/done').send({ completed: false, id: 1 });
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual({ deleted });
+  expect(repository.deleteDone).toHaveBeenCalledOnce();
+  expect(repository.deleteDone).toHaveBeenCalledWith();
+  expect(repository.delete).not.toHaveBeenCalled();
+});
+it('treats done as an invalid ID for the single-task routes', async () => {
+  const { app, repository } = setup();
+  for (const response of [await request(app).get('/api/todos/done'), await request(app).patch('/api/todos/done').send({ completed: true })]) {
+    expect(response.status).toBe(422);
+  }
+  expect(repository.get).not.toHaveBeenCalled();
+  expect(repository.update).not.toHaveBeenCalled();
+  expect(repository.deleteDone).not.toHaveBeenCalled();
+});
 it.each(['0', '-1', '1.5', 'abc', '9007199254740992'])('rejects invalid id %s without calling the repository', async (id) => {
   const { app, repository } = setup();
   for (const response of [await request(app).get(`/api/todos/${id}`), await request(app).patch(`/api/todos/${id}`).send({ completed: true }), await request(app).delete(`/api/todos/${id}`)]) {
@@ -123,5 +142,14 @@ it('propagates repository errors', async () => {
   const handleError: ErrorRequestHandler = (error, req, res, next) => { errors.push(error); res.status(500).json({ detail: 'Internal Server Error' }); };
   app.use(handleError);
   expect((await request(app).get('/api/todos')).status).toBe(500);
+  expect(errors).toEqual([new Error('Database unavailable')]);
+});
+it('propagates repository errors when deleting done tasks', async () => {
+  const { app, repository } = setup();
+  repository.deleteDone.mockRejectedValue(new Error('Database unavailable'));
+  const errors: unknown[] = [];
+  const handleError: ErrorRequestHandler = (error, req, res, next) => { errors.push(error); res.status(500).json({ detail: 'Internal Server Error' }); };
+  app.use(handleError);
+  expect((await request(app).delete('/api/todos/done')).status).toBe(500);
   expect(errors).toEqual([new Error('Database unavailable')]);
 });

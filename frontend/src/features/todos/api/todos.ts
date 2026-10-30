@@ -31,4 +31,6 @@ export const todosApi = {
     })
   },
   remove: (id: number) => request<void>(`/todos/${id}`, { method: 'DELETE' }),
+  clearDone: () =>
+    request<{ deleted: number }>('/todos/done', { method: 'DELETE' }),
 }

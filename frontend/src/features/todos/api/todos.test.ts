@@ -83,3 +83,18 @@ it('surfaces a server rejection of an ID', async () => {
   await expect(todosApi.remove(-1)).rejects.toThrow('Task not found.')
   expect(request).toHaveBeenCalledWith('/todos/-1', { method: 'DELETE' })
 })
+
+it('deletes every done task and returns the count', async () => {
+  vi.mocked(request).mockResolvedValue({ deleted: 2 })
+  await expect(todosApi.clearDone()).resolves.toEqual({ deleted: 2 })
+  expect(request).toHaveBeenCalledWith('/todos/done', { method: 'DELETE' })
+})
+
+it('surfaces a server failure when clearing done tasks', async () => {
+  vi.mocked(request).mockRejectedValue(
+    new Error('The operation failed. Please try again.'),
+  )
+  await expect(todosApi.clearDone()).rejects.toThrow(
+    'The operation failed. Please try again.',
+  )
+})
