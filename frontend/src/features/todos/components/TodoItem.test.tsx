@@ -143,6 +143,25 @@ it('marks an active task due in 2 days as due soon', () => {
   )
 })
 
+it('shows a task due in 3 days with a neutral badge and no mark', () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date(2026, 9, 29, 12))
+  render(
+    <TodoItem
+      todo={{ ...todoFixture, due_date: '2026-11-01' }}
+      busy={false}
+      onEdit={vi.fn()}
+      onToggle={vi.fn()}
+      onDelete={vi.fn()}
+    />,
+  )
+  expect(screen.getByText(/1 Nov 2026/)).toHaveTextContent(/^1 Nov 2026$/)
+  expect(vi.mocked(Badge).mock.calls.map(([props]) => props.variant)).toEqual([
+    'info',
+    'neutral',
+  ])
+})
+
 it('disables every control while busy', async () => {
   const user = userEvent.setup()
   const onEdit = vi.fn()
